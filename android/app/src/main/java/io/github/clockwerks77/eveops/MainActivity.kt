@@ -182,6 +182,7 @@ class MainActivity : Activity(), Bridge.Host {
     }
 
     override fun snapshot(json: String, settled: Boolean) {
+        if (!settled) return                      // mid-load figures would make the widgets flicker
         Snapshots.save(applicationContext, json)
         Widgets.updateAll(applicationContext)
     }

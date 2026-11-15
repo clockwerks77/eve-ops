@@ -91,12 +91,11 @@ class Headless(context: Context) {
                 override fun login(slot: String) {}
 
                 override fun snapshot(json: String, settled: Boolean) {
+                    if (!settled) return          // the page is still loading: wait for the full picture
                     Snapshots.save(ctx, json)
                     Widgets.updateAll(ctx)
-                    if (settled) {
-                        main.removeCallbacks(quiet)
-                        main.postDelayed(quiet, 6000)
-                    }
+                    main.removeCallbacks(quiet)
+                    main.postDelayed(quiet, 6000)
                 }
             }).attach(web)
             if (!linked) return false

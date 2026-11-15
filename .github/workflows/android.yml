@@ -1,7 +1,7 @@
 name: Android app
 
 # Every push that touches the app is compiled, tested and run on an emulator.
-# The APK is published as a release by pushing a tag named android-<n>,
+# The APK is published as a release when a commit changes android/RELEASE (put the next number in it),
 # or from the Actions tab: Android app -> Run workflow.
 on:
   workflow_dispatch:
@@ -12,7 +12,6 @@ on:
         default: true
   push:
     branches: [main]
-    tags: ['android-*']
     paths: ['android/**', '.github/workflows/android.yml']
 
 permissions:
@@ -30,6 +29,8 @@ jobs:
       EVEOPS_BUILD: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - uses: actions/setup-java@v4
         with:
@@ -89,12 +90,17 @@ jobs:
           echo "::notice title=apk::build 1.0.$EVEOPS_BUILD, $size, $EVEOPS_SIGNING key, certificate $cert"
 
       - name: Publish the APK
-        if: startsWith(github.ref, 'refs/tags/android-') || (github.event_name == 'workflow_dispatch' && inputs.publish)
         env:
           GH_TOKEN: ${{ github.token }}
+          ASKED: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
+          # publish when asked from the Actions tab, or when this commit changed android/RELEASE
+          if [ "$ASKED" != "true" ] && ! git diff --name-only HEAD~1 HEAD | grep -qx 'android/RELEASE'; then
+            echo "Not a release commit: nothing published."
+            exit 0
+          fi
           v="1.0.$EVEOPS_BUILD"
-          case "$GITHUB_REF" in refs/tags/*) tag="$GITHUB_REF_NAME" ;; *) tag="android-$EVEOPS_BUILD" ;; esac
+          tag="android-$EVEOPS_BUILD"
           apk="eve-ops-$v.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "$apk"
           {
