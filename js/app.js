@@ -115,7 +115,7 @@
     orders: [], ordersAt: 0, tx: [], assets: [], books: new Map(), jumps: new Map(),
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
-    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, wantWake: false, wake: null,
+    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
     prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
@@ -392,6 +392,17 @@
       } catch (err) { out[id] = { err: err.message || String(err) }; }
     }));
     S.routes = out;
+    // hub to hub, for the trip plan (kept for a week like every route)
+    const hs = hubIds(), legs = {};
+    await Promise.all(hs.reduce((jobs, a, i) => jobs.concat(hs.slice(i + 1).map(async b => {
+      try {
+        const sa = await station(a), sb = await station(b);
+        const pair = await Promise.all([route(sa.system, sb.system, 'shortest'), route(sa.system, sb.system, 'secure').catch(() => null)]);
+        await Promise.all(Array.from(new Set(pair[0].concat(pair[1] || []))).map(system));
+        legs[a + ':' + b] = { short: pair[0], safe: pair[1] };
+      } catch (err) { /* that pair is left out of the plan */ }
+    })), []));
+    S.legs = legs;
     const sysId = (S.planets[0] || {}).system;
     if (sysId) {
       await system(sysId).catch(() => {});
@@ -744,6 +755,58 @@
     }).sort((a, b) => a.name.localeCompare(b.name));
     const haul = { rows: haulRows, units: sum(haulRows, r => r.qty), m3: sum(haulRows, r => r.m3), cargo: S.cargo };
 
+    // ---- trip plan: the hubs with something to do, in the order that takes the fewest jumps
+    const trip = (() => {
+      if (!S.loc || !list.length) return null;
+      const jita = C.jita.station, byName = new Map(C.hubs.map(hb => [hb.name, hb.station]));
+      const drops = new Map();
+      for (const r of haulRows) { const to = byName.get(r.best); if (to && to !== jita) drops.set(to, (drops.get(to) || 0) + r.qty); }
+      const bids = restock.slice(0, 12).filter(r => r.bid != null && r.want && !r.thin).length;
+      const viaJita = haulRows.length > 0 && list.some(s => s.id === jita) && !S.tripSkip.has(jita);
+      const jobsAt = s => {
+        const jobs = [];
+        if (s.check) jobs.push(s.check + ' to check');
+        if (s.change) jobs.push(s.change + ' to change');
+        if (s.optional) jobs.push(s.optional + ' your call');
+        if (s.id === jita && haulRows.length) jobs.push('pick up ' + plural(haul.units, 'unit'));
+        if (s.id === jita && bids) jobs.push(plural(bids, 'bid') + ' to place');
+        if (viaJita && drops.has(s.id)) jobs.push('drop off ' + plural(drops.get(s.id), 'unit'));
+        if (pi && pi.near && isFinite(pi.near.jumps) && pi.near.station === s.id && pi.go !== 'wait') jobs.push('planetary pickup');
+        return jobs;
+      };
+      // One visit per hub, except the hub you are docked in when stock for it is still in Jita: its orders are done now, the drop on the way back.
+      const withWork = [];
+      for (const st of list) {
+        const jobs = jobsAt(st), drop = viaJita && drops.has(st.id) ? jobs.find(x => x.indexOf('drop off') === 0) : null;
+        if (drop && st.docked && jobs.length > 1) {
+          withWork.push({ key: String(st.id), s: st, jobs: jobs.filter(x => x !== drop) });
+          withWork.push({ key: st.id + ':drop', s: st, jobs: [drop], again: true });
+        } else if (jobs.length) withWork.push({ key: drop ? st.id + ':drop' : String(st.id), s: st, jobs });
+      }
+      const going = withWork.filter(x => !S.tripSkip.has(x.s.id));
+      const idOf = key => (key === 'start' ? key : Number(String(key).split(':')[0]));
+      const path = (a, b) => {                       // system by system, in travel order
+        a = idOf(a); b = idOf(b);
+        if (a === b) return [hop(list.find(x => x.id === b).system)];
+        if (a === 'start') { const st = list.find(x => x.id === b); return st.docked ? [hop(st.system)] : (S.tripSafe && st.safeRoute) || st.shortRoute; }
+        const fwd = S.legs[a + ':' + b], back = S.legs[b + ':' + a], leg = fwd || back;
+        const ids = leg ? (S.tripSafe && leg.safe) || leg.short : null;
+        return ids ? (fwd ? ids : ids.slice().reverse()).map(hop) : null;
+      };
+      const dist = (a, b) => { const hops = path(a, b); return hops ? hops.length - 1 : null; };
+      const plan = going.length ? L.tripPlan(going.map(x => x.key), dist, going.filter(x => /:drop$/.test(x.key)).map(x => [String(jita), x.key])) : null;
+      const stopsOut = plan ? plan.order.map((key, i) => {
+        const x = going.find(g => g.key === key), hops = path(i ? plan.order[i - 1] : 'start', key) || [];
+        return { id: x.s.id, short: x.s.short, jobs: x.jobs, here: x.s.docked && i === 0, again: !!x.again, jumps: plan.legs[i], hot: hops.slice(1).filter(y => y.ship + y.pod > 0).length };
+      }) : [];
+      const seen = new Set();
+      return {
+        stops: stopsOut, total: plan ? plan.total : 0, safe: S.tripSafe, stuck: going.length > 0 && !plan,
+        skipped: withWork.filter(x => S.tripSkip.has(x.s.id) && !seen.has(x.s.id) && seen.add(x.s.id)).map(x => ({ id: x.s.id, short: x.s.short })),
+        idle: list.filter(st => !withWork.some(x => x.s === st)).map(st => st.short),
+      };
+    })();
+
     // ---- what changed since the baseline ("Mark as seen")
     const snapshot = {};
     for (const st of list) for (const r of st.sells.concat(st.bids)) snapshot[r.id] = { t: r.type, l: st.id, b: st.bids.indexOf(r) >= 0, s: r.pos ? r.pos.status : '' };
@@ -787,7 +850,7 @@
 
     return {
       now, stops: list, slow: slow.slice(0, 8), tab: S.tab, pi,
-      restock: restock.slice(0, 12), haul, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
+      restock: restock.slice(0, 12), haul, trip, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
       wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0, scout, both: wealth != null && scout ? wealth + scout.wealth : null,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
@@ -975,6 +1038,37 @@
       s.id === C.jita.station && m.restock.length ? restockView(m) : null,
       s.hangar.length && s.id !== C.jita.station ? h('p', { class: 'hangar' }, h('span', { class: 'hangar-label' }, 'In the hangar, not listed'),
         s.hangar.map(x => h('span', { class: 'hangar-item' }, x.name + ' ×' + num(x.qty)))) : null);
+  }
+
+  /** The hubs with something to do, in the order that takes the fewest jumps from where the character is. */
+  function tripView(m) {
+    const t = m.trip;
+    if (!t || (!t.stops.length && !t.skipped.length)) return null;
+    const pick = id => { S.tab = id; S.follow = false; paint(); };
+    const skip = (id, on) => { if (on) S.tripSkip.add(id); else S.tripSkip.delete(id); paint(); };
+    const keep = () => { if (!demo) E.store.set('eveops.trip', { safe: S.tripSafe, open: S.tripOpen }); paint(); };
+    const mode = safe => { S.tripSafe = safe; keep(); };
+    const next = t.stops.find(x => !x.here);
+    const hot = sum(t.stops, x => x.hot);
+    return h('section', { class: 'trip', 'aria-label': 'Trip plan' },
+      h('div', { class: 'trip-head' },
+        h('h3', null, 'Trip plan'),
+        t.stops.length ? h('span', { class: 'trip-total' }, plural(t.total, 'jump') + ', ' + plural(t.stops.length, 'stop')) : null,
+        t.stuck ? h('span', { class: 'neg' }, 'No route joins these stops.') : null,
+        !S.tripOpen && next ? h('span', { class: 'trip-total' }, 'Next: ', h('button', { type: 'button', class: 'linkish', onclick: () => pick(next.id) }, next.short), ', ' + plural(next.jumps, 'jump')) : null,
+        h('span', { class: 'trip-mode', role: 'group', 'aria-label': 'Trip plan options' },
+          S.tripOpen ? h('button', { type: 'button', class: 'btn btn-quiet', 'aria-pressed': t.safe ? 'false' : 'true', onclick: () => mode(false) }, 'Shortest') : null,
+          S.tripOpen ? h('button', { type: 'button', class: 'btn btn-quiet', 'aria-pressed': t.safe ? 'true' : 'false', onclick: () => mode(true) }, 'Secure') : null,
+          h('button', { type: 'button', class: 'btn btn-quiet', 'aria-expanded': S.tripOpen ? 'true' : 'false', onclick: () => { S.tripOpen = !S.tripOpen; keep(); } }, S.tripOpen ? 'Hide' : 'Show'))),
+      !S.tripOpen ? null : [t.stops.length ? h('ol', { class: 'trip-legs' }, t.stops.map((x, i) => h('li', { class: 'trip-stop' + (x.here ? ' is-here' : '') },
+        h('span', { class: 'trip-leg' }, x.here ? 'Here' : (i ? 'then ' : '') + plural(x.jumps, 'jump'), x.hot ? h('span', { class: 'neg', title: plural(x.hot, 'system') + ' on this leg with ships or pods lost in the last hour' }, ', ' + x.hot + ' hot') : null),
+        h('button', { type: 'button', class: 'trip-name' + (x.id === m.tab ? ' is-on' : ''), onclick: () => pick(x.id) }, x.short, x.again ? ' again' : ''),
+        h('span', { class: 'trip-jobs' }, x.jobs.join(', ')),
+        h('button', { type: 'button', class: 'trip-skip', title: 'Leave ' + x.short + ' out of this trip', 'aria-label': 'Leave ' + x.short + ' out of this trip', onclick: () => skip(x.id, true) }, '\u00d7')))) : null,
+      t.skipped.length || t.idle.length ? h('p', { class: 'note' },
+        t.skipped.length ? ['Left out by you: ', t.skipped.map((x, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'linkish', onclick: () => skip(x.id, false) }, x.short + ' (put back)')]), '. '] : null,
+        t.idle.length ? 'Nothing to do in ' + t.idle.join(', ') + '. ' : null,
+        hot ? '"Hot" counts systems on a leg with ships or pods lost in the last hour.' : null) : hot ? h('p', { class: 'note' }, '"Hot" counts systems on a leg with ships or pods lost in the last hour.') : null]);
   }
 
   function tabsView(m) {
@@ -1271,7 +1365,7 @@
       demo ? h('p', { class: 'banner' }, 'Sample data. Routes are real, the orders and ISK are invented. ', h('a', { href: './' }, 'Leave sample data')) : '',
       topView(m),
       m ? h('main', { class: 'board' },
-        h('div', { class: 'stops' }, m.stops.length ? [tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m)]),
+        h('div', { class: 'stops' }, m.stops.length ? [tripView(m), tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m)]),
         h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);

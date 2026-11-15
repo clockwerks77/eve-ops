@@ -311,6 +311,30 @@
   }
 
   /**
+   * The order to visit a few stops in for the fewest jumps, ending wherever that leaves you.
+   * dist(a, b) gives the jumps between two stops, with 'start' for where you are now; null means no route, which rules that order out.
+   * `before` lists pairs [x, y]: x has to be visited before y (pick up in one place, drop in another).
+   * Every order is tried, so this is for a handful of stops. Ties keep the order the stops were given in.
+   * Returns { order, legs, total } or null when no order works.
+   */
+  function tripPlan(stops, dist, before) {
+    let best = null;
+    const rules = (before || []).filter(p => stops.indexOf(p[0]) >= 0 && stops.indexOf(p[1]) >= 0);
+    const walk = (order, rest, legs, total) => {
+      if (best && total >= best.total) return;
+      if (!rest.length) { best = { order, legs, total }; return; }
+      for (const st of rest) {
+        if (rules.some(p => p[1] === st && order.indexOf(p[0]) < 0)) continue;
+        const d = dist(order.length ? order[order.length - 1] : 'start', st);
+        if (d == null) continue;
+        walk(order.concat([st]), rest.filter(x => x !== st), legs.concat([d]), total + d);
+      }
+    };
+    walk([], stops.slice(0, 8), [], 0);
+    return best;
+  }
+
+  /**
    * What a "copied" mark on an order means now. The mark { price, at } is made when its price button is pressed.
    *   landed:  the order shows at the copied price, so the change went in
    *   waiting: the page's data on the order is not yet newer than the copy, allowing `grace` ms to type it in game
@@ -506,7 +530,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, copyState, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
+    orderChecks, weekOf, moveRead, copyState, tripPlan, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

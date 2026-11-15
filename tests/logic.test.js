@@ -358,3 +358,18 @@ test('slow line: a routine undercut on a line with no sales is offered, not urge
   assert.equal(L.planSells([{ order, pos: L.sellPosition(order, [order, deep], new Set([1]), true) }], Object.assign({ slowDays: 7 }, ctx)).get(1).kind, 'big');
   assert.equal(L.planSells([{ order, pos }], Object.assign({ slowDays: 7 }, ctx, { cost: 990000 })).get(1).action, 'hold');
 });
+
+test('trip plan: fewest jumps, pick-up before drop-off, and stops with no route', () => {
+  const d = { 'start:A': 2, 'start:B': 9, 'start:C': 5, 'A:B': 8, 'A:C': 4, 'B:C': 3 };
+  const dist = (a, b) => { const v = d[a + ':' + b]; return v != null ? v : d[b + ':' + a] != null ? d[b + ':' + a] : null; };
+  assert.deepEqual(L.tripPlan(['A', 'B', 'C'], dist), { order: ['A', 'C', 'B'], legs: [2, 4, 3], total: 9 });
+  // B holds the stock that C and A are waiting for: B first, whatever it costs
+  assert.deepEqual(L.tripPlan(['A', 'B', 'C'], dist, [['B', 'A'], ['B', 'C']]), { order: ['B', 'C', 'A'], legs: [9, 3, 4], total: 16 });
+  // a rule about a stop that is not on the trip is ignored
+  assert.deepEqual(L.tripPlan(['A', 'C'], dist, [['B', 'A']]).order, ['A', 'C']);
+  // one stop, already there
+  assert.deepEqual(L.tripPlan(['A'], () => 0), { order: ['A'], legs: [0], total: 0 });
+  // no route to a stop: no plan
+  assert.equal(L.tripPlan(['A', 'Z'], dist), null);
+  assert.equal(L.tripPlan([], dist).total, 0);
+});
