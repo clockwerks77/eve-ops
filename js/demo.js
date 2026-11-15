@@ -142,6 +142,7 @@
         { pin_id: 2, type_id: 3060, latitude: 0, longitude: 0, expiry_time: iso(-(i === 3 ? 2.2 * H : 20 * H + i * 9 * M)), extractor_details: { heads: [], product_type_id: 2268 } },
       ] }, 10 * M, 4 * M);
     }
+    if (/\/markets\/prices\/$/.test(path)) return answer([{ type_id: 527, average_price: 884000 }, { type_id: 2329, average_price: 9100 }, { type_id: 12733, average_price: 251400000 }], 60 * M, 20 * M);
     if ((m = path.match(/\/markets\/(\d+)\/orders\/$/))) return answer(books[m[1] + ':' + q.type_id] || [], 5 * M, 2.4 * M);
     if ((m = path.match(/\/universe\/stations\/(\d+)\/$/))) return answer({ station_id: Number(m[1]), name: names[m[1]] || 'Station ' + m[1], system_id: SYS[m[1]] || 30000144 }, D);
     if ((m = path.match(/\/universe\/systems\/(\d+)\/$/))) { const s = systems[m[1]] || ['System ' + m[1], 0.9]; return answer({ system_id: Number(m[1]), name: s[0], security_status: s[1] }, D); }

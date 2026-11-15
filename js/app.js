@@ -97,6 +97,7 @@
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, wantWake: false, wake: null,
+    prices: new Map(), tab: null, follow: true,
   };
   const me = () => '/characters/' + S.who.id;
   function feed(name, entry) { S.feeds[name] = { at: entry.modified, next: entry.expires, err: null }; }
@@ -111,6 +112,7 @@
     const moved = !S.loc || a.station_id !== b.station_id || a.structure_id !== b.structure_id || a.solar_system_id !== b.solar_system_id;
     S.loc = b; S.ship = pair[1].data; feed('Location', pair[0]);
     if (moved) {
+      S.follow = true; // show the hub they have just arrived at
       await Promise.all([
         system(b.solar_system_id).catch(() => {}),
         b.station_id || b.structure_id ? station(b.station_id || b.structure_id).catch(() => {}) : null,
@@ -151,6 +153,10 @@
   async function loadKills() {
     const r = await E.get('/universe/system_kills/');
     S.kills = new Map(r.data.map(k => [k.system_id, k])); feed('Kill feed', r);
+  }
+  async function loadPrices() {
+    const r = await E.get('/markets/prices/');
+    S.prices = new Map(r.data.map(x => [x.type_id, x.average_price || x.adjusted_price || 0])); feed('Item prices', r);
   }
   async function loadBooks() {
     const want = new Map();
@@ -235,7 +241,7 @@
       if (S.ship) ids.push(S.ship.ship_type_id);
       await resolveNames(ids).catch(() => {});
       S.ready = true; paint();
-      await Promise.all([load('Market books', loadBooks), load('Planets', loadPlanets), load('Routes', loadRoutes)]);
+      await Promise.all([load('Market books', loadBooks), load('Planets', loadPlanets), load('Routes', loadRoutes), load('Item prices', loadPrices)]);
       await loadReach().catch(() => {});
     } finally {
       S.running = false;
@@ -384,15 +390,28 @@
     const queue = S.queue.filter(q => q.finish_date && Date.parse(q.finish_date) > now).sort((a, b) => a.queue_position - b.queue_position);
     const lastJump = S.clones && S.clones.last_clone_jump_date ? Date.parse(S.clones.last_clone_jump_date) : null;
 
+    // everything in hangars and ships, at EVE's universe-wide average price
+    let held = 0;
+    for (const a of S.assets) {
+      if (a.is_blueprint_copy) continue;
+      held += (S.prices.get(a.type_id) || 0) * a.quantity;
+    }
+    const wealth = S.wallet == null ? null : S.wallet + escrow + listed + held;
+
+    // which hub tab is showing: follow the character on arrival, otherwise leave the choice alone
+    const at = list.find(s => s.docked) || list.find(s => s.inSystem);
+    if (S.follow && at) { S.tab = at.id; S.follow = false; }
+    if (!list.some(s => s.id === S.tab)) S.tab = list.length ? (at || list[0]).id : null;
+
     return {
-      now, stops: list, slow: slow.slice(0, 8),
-      wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted,
+      now, stops: list, slow: slow.slice(0, 8), tab: S.tab,
+      wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
       today: L.summarize(led.sales, L.startOfDay(now), Infinity),
       days: L.daily(led.sales, 14, now), windowDays,
       planets: S.planets.slice().sort((a, b) => (a.expiry == null ? Infinity : a.expiry) - (b.expiry == null ? Infinity : b.expiry)),
-      skill: queue.length ? { name: nameOf(queue[0].skill_id), level: queue[0].finished_level, done: Date.parse(queue[0].finish_date), end: Date.parse(queue[queue.length - 1].finish_date), count: queue.length } : null,
+      queue: queue.map(q => ({ name: nameOf(q.skill_id), level: q.finished_level, done: Date.parse(q.finish_date) })),
       clone: S.clones ? { ready: lastJump ? lastJump + (24 - lv(SKILL.infomorph)) * H : 0, at: (S.clones.jump_clones || []).map(j => { const st = K.stations[j.location_id]; const sy = st && K.systems[st.system]; return sy ? sy.name : st ? st.name.split(' ')[0] : null; }).filter(Boolean) } : null,
     };
   }
@@ -507,13 +526,12 @@
     if (s.change) summary.push(s.change + ' to change');
     if (s.optional) summary.push(s.optional + ' optional');
     if (!s.change && !s.optional) summary.push('Nothing to change');
-    return h('section', { class: 'stop' + (s.docked ? ' is-here' : ''), id: 'stop-' + s.id },
+    return h('section', { class: 'stop' + (s.docked ? ' is-here' : ''), id: 'stop-' + s.id, role: 'tabpanel', 'aria-label': s.short },
       h('header', { class: 'stop-head' },
         h('div', { class: 'stop-title' },
-          h('h2', null, s.short),
+          h('h2', null, s.station),
           h('span', { class: 'stop-state' }, state),
           h('span', { class: 'stop-sum' }, summary.join(', '))),
-        h('p', { class: 'stop-sub' }, s.station),
         !s.docked && s.shortRoute && s.shortRoute.length > 1 && h('div', { class: 'routes' },
           strip(s.safeRoute ? 'Shortest' : 'Route', s.shortRoute),
           s.safeRoute && strip('Secure', s.safeRoute)),
@@ -525,6 +543,18 @@
       s.bids.length ? h('div', { class: 'rows' }, head(['Buy orders', 'Filled', 'Your bid', 'Bids above you', 'Call', 'Type this', 'In escrow', 'Expires']), s.bids.map(bidRow)) : null,
       s.hangar.length ? h('p', { class: 'hangar' }, h('span', { class: 'hangar-label' }, s.id === C.jita.station ? 'In the hangar to collect' : 'In the hangar, not listed'),
         s.hangar.map(x => h('span', { class: 'hangar-item' }, x.name + ' ×' + num(x.qty)))) : null);
+  }
+
+  function tabsView(m) {
+    const pick = id => { S.tab = id; S.follow = false; paint(); };
+    return h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Hubs, nearest first' }, m.stops.map(s => {
+      const on = s.id === m.tab;
+      const where = s.docked ? 'Docked here' : s.inSystem ? 'In this system' : s.jumps != null ? plural(s.jumps, 'jump') : '';
+      return h('button', { type: 'button', role: 'tab', class: 'tab' + (on ? ' is-on' : '') + (s.docked ? ' is-here' : ''), 'aria-selected': on ? 'true' : 'false', onclick: () => pick(s.id) },
+        h('span', { class: 'tab-name' }, s.short),
+        h('span', { class: 'tab-sub' }, where),
+        h('span', { class: 'tab-count' + (s.change ? '' : ' is-zero') }, s.change ? s.change + ' to change' : 'Nothing to change'));
+    }));
   }
 
   function pin(rows) {
@@ -550,10 +580,14 @@
         fact('Net after fees', L.short(m.week.net), 'estimate'),
         fact('Sold', L.short(m.week.gross), plural(m.week.units, 'unit')),
         fact('Today', L.short(m.today.net), L.short(m.today.gross) + ' sold')),
-      h('div', { class: 'bars', role: 'img', 'aria-label': 'Net after fees per day, last 14 days' },
-        m.days.map((d, i) => h('span', { class: 'bar' + (i === m.days.length - 1 ? ' is-today' : ''), title: new Date(d.day).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) + ': ' + L.short(d.net) },
-          h('span', { class: 'col' }, h('i', { style: { height: Math.max(2, Math.round(Math.max(d.net, 0) / top * 100)) + '%' } })),
-          h('b', null, new Date(d.day).toLocaleDateString('en-CA', { weekday: 'narrow' }))))),
+      h('div', { class: 'bars', role: 'list', 'aria-label': 'Net after fees per day, last 14 days' },
+        m.days.map((d, i) => {
+          const day = new Date(d.day).toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' });
+          return h('span', { class: 'bar' + (i === m.days.length - 1 ? ' is-today' : ''), role: 'listitem', tabindex: 0, 'aria-label': day + ': net ' + L.short(d.net) + ', sold ' + L.short(d.gross) },
+            h('span', { class: 'tip' }, h('b', null, day), h('span', null, 'Net ' + L.short(d.net)), h('span', null, 'Sold ' + L.short(d.gross) + ', ' + plural(d.units, 'unit'))),
+            h('span', { class: 'col' }, h('i', { style: { height: Math.max(2, Math.round(Math.max(d.net, 0) / top * 100)) + '%' } })),
+            h('b', { class: 'day' }, new Date(d.day).toLocaleDateString('en-CA', { weekday: 'narrow' })));
+        })),
       h('p', { class: 'note' }, 'Best of the last 14 days: ' + L.short(best.net) + ' on ' + new Date(best.day).toLocaleDateString('en-CA', { weekday: 'long' }) + '.'
         + (m.week.uncovered ? ' ' + plural(m.week.uncovered, 'unit') + ' sold this week had no purchase on record, so they add to "Sold" but not to net.' : '')));
   }
@@ -564,23 +598,36 @@
         fact('Wallet', m.wallet == null ? '' : L.isk(Math.round(m.wallet))),
         fact('In buy orders', L.isk(Math.round(m.escrow)), plural(m.bidCount, 'bid')),
         fact('Listed, at your prices', L.isk(Math.round(m.listed))),
+        fact('Hangars and ships', m.priced ? L.isk(Math.round(m.held)) : '', m.priced ? 'at EVE average prices' : 'loading prices'),
+        h('div', { class: 'fact fact-total' }, h('dt', null, 'Overall wealth'), h('dd', null, m.wealth == null ? '' : L.isk(Math.round(m.wealth))))),
+      h('dl', { class: 'facts facts-more' },
         fact('Listed, at cost', L.isk(Math.round(m.listedCost)), m.uncosted ? plural(m.uncosted, 'unit') + ' without a cost' : 'estimate'),
         m.slots && fact('Order slots', m.slots.used + ' of ' + m.slots.max)));
   }
-  function timersPanel(m) {
-    const rows = [];
-    m.planets.forEach(p => rows.push(h('li', { class: p.expiry != null && p.expiry < m.now + 6 * H ? 'is-soon' : '' },
-      h('span', { class: 't-what' }, p.name, h('span', { class: 'sub' }, p.extractors ? 'extractors' : 'no extractors')),
-      p.expiry == null ? h('span', { class: 't-when' }, '') : p.expiry === 0 ? h('span', { class: 't-when' }, 'Not running')
-        : h('span', { class: 't-when' }, p.expiry < m.now ? 'Stopped ' : 'Stops ', live('until', p.expiry), h('span', { class: 'sub' }, clock(p.expiry))))));
-    if (m.skill) rows.push(h('li', null,
-      h('span', { class: 't-what' }, m.skill.name + ' ' + roman[m.skill.level], h('span', { class: 'sub' }, m.skill.count > 1 ? 'then ' + plural(m.skill.count - 1, 'more skill') : 'last in the queue')),
-      h('span', { class: 't-when' }, 'Done ', live('until', m.skill.done), h('span', { class: 'sub' }, 'queue ends ' + clock(m.skill.end)))));
-    else if (S.skills) rows.push(h('li', { class: 'is-soon' }, h('span', { class: 't-what' }, 'Skill queue'), h('span', { class: 't-when' }, 'Empty')));
-    if (m.clone) rows.push(h('li', null,
-      h('span', { class: 't-what' }, 'Jump clone', h('span', { class: 'sub' }, m.clone.at.length ? 'clones in ' + m.clone.at.join(', ') : null)),
-      h('span', { class: 't-when' }, m.clone.ready > m.now ? ['Ready ', live('until', m.clone.ready), h('span', { class: 'sub' }, clock(m.clone.ready))] : 'Ready now')));
-    return h('section', { class: 'panel' }, h('h3', null, 'Timers'), rows.length ? h('ul', { class: 'timers' }, rows) : h('p', { class: 'note' }, 'Loading.'));
+  function piPanel(m) {
+    return h('section', { class: 'panel' }, h('h3', null, 'Planetary Interaction Timers'),
+      m.planets.length ? h('ul', { class: 'timers' }, m.planets.map(p => h('li', { class: p.expiry != null && p.expiry < m.now + 6 * H ? 'is-soon' : '' },
+        h('span', { class: 't-what' }, p.name, h('span', { class: 'sub' }, p.type + (p.extractors ? '' : ', no extractors'))),
+        p.expiry == null ? h('span', { class: 't-when' }, '') : p.expiry === 0 ? h('span', { class: 't-when' }, 'Not running')
+          : h('span', { class: 't-when' }, p.expiry < m.now ? 'Stopped ' : 'Stops ', live('until', p.expiry), h('span', { class: 'sub' }, clock(p.expiry))))))
+        : h('p', { class: 'note' }, S.feeds.Planets ? 'No colonies.' : 'Loading.'));
+  }
+  function skillPanel(m) {
+    const q = m.queue;
+    return h('section', { class: 'panel' }, h('h3', null, 'Skill Queue'),
+      q.length ? [h('ul', { class: 'timers' }, q.slice(0, 6).map((x, i) => h('li', null,
+        h('span', { class: 't-what' }, x.name + ' ' + roman[x.level], h('span', { class: 'sub' }, i === 0 ? 'training now' : 'queued')),
+        h('span', { class: 't-when' }, 'Done ', live('until', x.done), h('span', { class: 'sub' }, clock(x.done)))))),
+        h('p', { class: 'note' }, (q.length > 6 ? plural(q.length - 6, 'more skill') + ' after these. ' : '') + 'Queue ends ' + new Date(q[q.length - 1].done).toLocaleString('en-CA', { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '.')]
+        : h('ul', { class: 'timers' }, h('li', { class: S.skills ? 'is-soon' : '' }, h('span', { class: 't-what' }, 'Nothing training'), h('span', { class: 't-when' }, S.skills ? 'Queue is empty' : 'Loading'))));
+  }
+  function clonePanel(m) {
+    const c = m.clone;
+    return h('section', { class: 'panel' }, h('h3', null, 'Jump Clone'),
+      c ? h('ul', { class: 'timers' }, h('li', null,
+        h('span', { class: 't-what' }, 'Next jump', h('span', { class: 'sub' }, c.at.length ? 'clones in ' + c.at.join(', ') : 'no jump clones installed')),
+        h('span', { class: 't-when' }, c.ready > m.now ? ['Ready ', live('until', c.ready), h('span', { class: 'sub' }, clock(c.ready))] : 'Ready now')))
+        : h('p', { class: 'note' }, 'Loading.'));
   }
   function slowPanel(m) {
     const hub = id => { const s = m.stops.find(x => x.id === id); return s ? s.short : ''; };
@@ -592,7 +639,7 @@
         : h('p', { class: 'note' }, m.windowDays < C.staleDays ? 'Needs ' + C.staleDays + ' days of sales history; EVE has returned ' + Math.floor(m.windowDays) + '.' : 'Every line has sold in the last ' + C.staleDays + ' days and clears within a month.'));
   }
   function dataPanel() {
-    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Hangars', 'Planets', 'Kill feed', 'Location', 'Skills and clones', 'Routes'];
+    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Hangars', 'Planets', 'Kill feed', 'Item prices', 'Location', 'Skills and clones', 'Routes'];
     return h('section', { class: 'panel panel-data' }, h('h3', null, 'How fresh this is'),
       h('ul', { class: 'feeds' }, names.filter(n => S.feeds[n]).map(n => {
         const f = S.feeds[n];
@@ -615,6 +662,7 @@
     return h('header', { class: 'top' },
       h('div', { class: 'who' }, h('h1', null, S.who.name), h('p', null, where + ship)),
       m && h('dl', { class: 'purse' },
+        h('div', null, h('dt', null, 'Overall wealth'), h('dd', { title: m.wealth == null ? '' : L.isk(Math.round(m.wealth)) }, m.wealth == null ? '' : L.short(m.wealth))),
         h('div', null, h('dt', null, 'Wallet'), h('dd', { title: m.wallet == null ? '' : L.isk(m.wallet) }, m.wallet == null ? '' : L.short(m.wallet))),
         h('div', null, h('dt', null, 'In buy orders'), h('dd', null, L.short(m.escrow))),
         h('div', null, h('dt', null, 'Net since Monday'), h('dd', null, L.short(m.week.net)))),
@@ -631,8 +679,8 @@
       demo ? h('p', { class: 'banner' }, 'Sample data. Routes are real, the orders and ISK are invented. ', h('a', { href: './' }, 'Leave sample data')) : '',
       topView(m),
       m ? h('main', { class: 'board' },
-        h('div', { class: 'stops' }, m.stops.length ? m.stops.map(stopView) : h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.')),
-        h('aside', { class: 'side' }, weekPanel(m), booksPanel(m), timersPanel(m), slowPanel(m), dataPanel()))
+        h('div', { class: 'stops' }, m.stops.length ? [tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0])] : h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.')),
+        h('aside', { class: 'side' }, weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), clonePanel(m), slowPanel(m), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);
   }
