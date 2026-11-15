@@ -47,6 +47,12 @@ class AppOnDeviceTest {
         return what()
     }
 
+    /** A slow emulator sometimes reports that the launcher "isn't responding"; that dialog would cover what is being checked. */
+    private fun seen(text: String, seconds: Int): Boolean = waitFor(seconds) {
+        device.findObject(By.text("Wait"))?.click()
+        device.hasObject(By.text(text))
+    }
+
     private fun start(intent: Intent) {
         ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
     }
@@ -71,12 +77,12 @@ class AppOnDeviceTest {
         // a phone's 4-by-2 space, the smallest space, a tall one, and a wide one as on a tablet or an unfolded phone
         for ((name, width, height) in listOf(Triple("phone", 0, 200), Triple("small", 0, 120), Triple("tall", 0, 300), Triple("narrow", 300, 190))) {
             start(Intent(ctx, PreviewActivity::class.java).putExtra("width", width).putExtra("height", height))
-            assertTrue("widgets drawn, $name", device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 15_000))
+            assertTrue("widgets drawn, $name", seen("Sample Trader (sample data)", 25))
             Thread.sleep(1200)
             shot("widgets-$name")
         }
         start(Intent(ctx, PreviewActivity::class.java).putExtra("width", 640).putExtra("height", 290).putExtra("landscape", true))
-        assertTrue("widgets drawn, wide", device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 20_000))
+        assertTrue("widgets drawn, wide", seen("Sample Trader (sample data)", 25))
         Thread.sleep(2500)
         shot("widgets-wide")
         device.pressHome()
