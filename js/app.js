@@ -115,7 +115,7 @@
     orders: [], ordersAt: 0, tx: [], assets: [], books: new Map(), jumps: new Map(),
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
-    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
+    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, journal: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
     prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
@@ -184,6 +184,8 @@
     }
     S.tx = all; feed('Sales and purchases', first);
   }
+  /** The wallet journal (EVE keeps 30 days): the exact fees, tax and balances behind the weekly close. */
+  async function loadJournal() { const r = await E.get(me() + '/wallet/journal/', { auth: true }); S.journal = r.data; feed('Wallet journal', r); }
   async function loadAssets() { const r = await E.get(me() + '/assets/', { auth: true }); S.assets = r.data; feed('Hangars', r); }
   async function loadSkills() {
     const r = await Promise.all([E.get(me() + '/skillqueue/', { auth: true }), E.get(me() + '/skills/', { auth: true }), E.get(me() + '/clones/', { auth: true })]);
@@ -434,7 +436,7 @@
     try {
       await Promise.all([
         load('Location', loadLocation), load('Wallet', loadWallet), load('Your orders', loadOrders),
-        load('Sales and purchases', loadTx), load('Hangars', loadAssets), load('Skills and clones', loadSkills), load('Kill feed', loadKills),
+        load('Sales and purchases', loadTx), load('Wallet journal', loadJournal), load('Hangars', loadAssets), load('Skills and clones', loadSkills), load('Kill feed', loadKills),
       ]);
       if (!demo && !E.who()) return;
       const ids = [];
@@ -807,6 +809,46 @@
       };
     })();
 
+    // ---- weekly closes: each finished week's figures are fixed the first time they are seen complete, so they outlast EVE's history
+    const closes = (() => {
+      const W = S.weeks, cur = L.startOfWeek(now), curKey = L.weekKey(cur);
+      const txAt = (S.feeds['Sales and purchases'] || {}).at || 0, jAt = (S.feeds['Wallet journal'] || {}).at || 0;
+      let changed = false;
+      const first = led.from == null ? cur : L.startOfWeek(led.from) < led.from ? L.weekAfter(L.startOfWeek(led.from)) : L.startOfWeek(led.from);
+      const starts = new Set(Object.keys(W.w).map(L.weekStart));
+      for (let ws = first; ws <= cur; ws = L.weekAfter(ws)) starts.add(ws);
+      starts.add(cur);
+      // this week: note the wallet and the ISK in buy orders as last seen, which is what the close will show for them
+      const c = W.w[curKey] || (W.w[curKey] = {});
+      if (S.wallet != null && S.books.size && (c.escrow !== escrow || c.wallet !== S.wallet) && now - (c.seenAt || 0) > 15 * 60000) { c.escrow = escrow; c.wallet = S.wallet; c.seenAt = now; changed = true; }
+      const rows = [];
+      for (const ws of Array.from(starts).sort((a, b) => a - b)) {
+        const we = L.weekAfter(ws), key = L.weekKey(ws), closed = we <= now;
+        let rec = W.w[key] || {};
+        if (!rec.frozenAt) {
+          const sm = L.summarize(led.sales, ws, we), fig = { gross: sm.gross, units: sm.units, net: sm.net, uncovered: sm.uncovered };
+          if (closed && txAt >= we) { rec = W.w[key] = Object.assign({}, rec, fig, { frozenAt: now }); changed = true; }
+          else rec = Object.assign({}, rec, fig);
+        }
+        const j = S.journal ? L.journalSpan(S.journal, ws, we) : null;
+        const exact = j && j.covered && (!closed || jAt >= we) ? { fees: j.broker + j.tax, change: j.change, close: closed ? j.close : null } : null;
+        if (exact && closed && rec.frozenAt && rec.close == null && exact.close != null) { Object.assign(W.w[key], exact); rec = W.w[key]; changed = true; }
+        const src = rec.close != null ? rec : exact || {};
+        rows.push({
+          key, start: ws, end: we, closed, gross: rec.gross, units: rec.units, net: rec.net, uncovered: rec.uncovered || 0,
+          fees: src.fees != null ? src.fees : null, change: src.change != null ? src.change : null,
+          close: closed ? (src.close != null ? src.close : rec.wallet != null ? rec.wallet : null) : S.wallet, closeSeen: closed && src.close == null && rec.wallet != null ? rec.seenAt : null,
+          escrow: closed ? (rec.escrow != null ? rec.escrow : null) : escrow, escrowSeen: closed ? rec.seenAt || null : null,
+          tracker: rec.tracker && rec.tracker.v != null ? rec.tracker.v : null,
+        });
+      }
+      if (changed) saveWeeks(true);
+      const done = rows.filter(r => r.closed), tie = L.tieOut(done, C.tieOut.within);
+      done.forEach((r, i) => { r.diff = tie.rows[i].diff; r.tied = tie.rows[i].tied; });
+      const carried = W.carried && W.carried.v != null ? W.carried.v : null;
+      return { rows: rows.slice().reverse(), since: rows.length ? rows[0].start : cur, carried, toDate: (carried || 0) + sum(rows, r => r.net || 0), run: tie.run, need: C.tieOut.weeks, journal: !!S.journal };
+    })();
+
     // ---- what changed since the baseline ("Mark as seen")
     const snapshot = {};
     for (const st of list) for (const r of st.sells.concat(st.bids)) snapshot[r.id] = { t: r.type, l: st.id, b: st.bids.indexOf(r) >= 0, s: r.pos ? r.pos.status : '' };
@@ -850,7 +892,7 @@
 
     return {
       now, stops: list, slow: slow.slice(0, 8), tab: S.tab, pi,
-      restock: restock.slice(0, 12), haul, trip, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
+      restock: restock.slice(0, 12), haul, trip, closes, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
       wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0, scout, both: wealth != null && scout ? wealth + scout.wealth : null,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
@@ -1214,6 +1256,46 @@
       h('p', { class: 'note' }, 'Hub columns are the lowest ask in each station, highest marked. Value uses the ' + p.sellName + ' ask. EVE only reports a colony as it was when last opened in game, so the units are worked out from there: an estimate.'));
   }
 
+  function saveWeeks(quiet) { if (!demo) E.store.set('eveops.weeks', S.weeks); if (!quiet) paint(); }
+  /** Finished weeks, newest first: the page's own figures, the exact ones from the wallet journal, and a box for the tracker's net to tie out against. */
+  function closesView(m) {
+    const c = m.closes;
+    if (!c) return null;
+    const typed = (text, apply) => { const t = String(text).trim(), v = t === '' ? null : L.parseIsk(t); if (t !== '' && v == null) return paint(); apply(v); saveWeeks(); };
+    const setTracker = (key, text) => typed(text, v => { const w = S.weeks.w[key] || (S.weeks.w[key] = {}); w.tracker = { v, at: Date.now() }; });
+    const setCarried = text => typed(text, v => { S.weeks.carried = { v, at: Date.now() }; });
+    const day = ms => new Date(ms).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+    const box = (keep, value, label, onset) => h('input', { class: 'isk-in', type: 'text', inputmode: 'decimal', 'data-keep': keep, 'aria-label': label, placeholder: keep === 'carried' ? 'e.g. 1.25B' : '', value: value == null ? '' : L.isk(Math.round(value)),
+      onchange: e => onset(e.target.value), onkeydown: e => { if (e.key === 'Enter') e.target.blur(); } });
+    const signed = v => (v > 0 ? '+' : '') + L.short(v);
+    const status = c.run >= c.need ? 'Tied ' + plural(c.run, 'week') + ' running: the page can take over as the ledger.'
+      : c.run ? 'Tied ' + plural(c.run, 'week') + ' running; ' + c.need + ' in a row and the page can take over as the ledger.'
+      : 'Type the tracker\u2019s net for a finished week to tie it out. A week ties within ' + Math.round(C.tieOut.within * 100) + '%.';
+    return h('section', { class: 'pi closes', id: 'closes' },
+      h('header', { class: 'pi-head' },
+        h('h2', null, 'Weekly close'),
+        h('span', { class: 'chip ' + (c.run >= c.need ? 'chip-lead' : 'chip-hold') }, c.run >= c.need ? 'Tied out' : c.run ? 'Tied ' + c.run + ' of ' + c.need : 'Not tied yet'),
+        h('span', { class: 'stop-sum' }, 'Realized net to date ' + L.short(c.toDate))),
+      h('p', { class: 'pi-note' }, status),
+      h('p', { class: 'closes-carry' }, h('label', null, 'Realized net before ' + day(c.since) + ', from the tracker ', box('carried', c.carried, 'Realized net carried in from the tracker', setCarried)),
+        h('span', { class: 'sub' }, c.carried == null ? 'Left empty, "to date" counts from ' + day(c.since) + '.' : 'Included in "to date".')),
+      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table closes-table' },
+        h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Week'), h('th', null, 'Sold'), h('th', null, 'Net after fees'), h('th', null, 'Tracker\u2019s net'), h('th', null, 'Difference'),
+          h('th', null, 'Broker fees and tax'), h('th', null, 'Wallet change'), h('th', null, 'Wallet at close'), h('th', null, 'In buy orders'))),
+        h('tbody', null, c.rows.slice(0, 8).map(r => h('tr', { class: r.closed ? '' : 'is-open' },
+          h('td', { class: 'l' }, day(r.start) + ' to ' + day(r.end - D), h('span', { class: 'sub' }, r.closed ? 'closed' : 'this week so far')),
+          h('td', null, L.short(r.gross), h('span', { class: 'sub' }, plural(r.units, 'unit'))),
+          h('td', null, L.short(r.net), r.uncovered ? h('span', { class: 'sub' }, plural(r.uncovered, 'unit') + ' without a cost') : h('span', { class: 'sub' }, 'estimate')),
+          h('td', null, r.closed ? box('t' + r.key, r.tracker, 'Tracker net for the week of ' + day(r.start), v => setTracker(r.key, v)) : ''),
+          h('td', { class: r.tied == null ? '' : r.tied ? 'best' : 'neg' }, r.tied == null ? '' : [r.tied ? 'Tied' : 'Off', h('span', { class: 'sub' }, signed(r.diff))]),
+          h('td', null, r.fees == null ? '' : L.short(r.fees)),
+          h('td', null, r.change == null ? '' : signed(r.change)),
+          h('td', null, r.close == null ? '' : L.isk(Math.round(r.close)), r.closeSeen ? h('span', { class: 'sub' }, 'as seen ' + clock(r.closeSeen)) : r.closed ? null : h('span', { class: 'sub' }, 'now')),
+          h('td', null, r.escrow == null ? '' : L.short(r.escrow), r.escrowSeen ? h('span', { class: 'sub' }, 'as seen ' + clock(r.escrowSeen)) : r.closed ? null : h('span', { class: 'sub' }, 'now'))))))),
+      h('p', { class: 'note' }, 'Weeks run Monday to Sunday on this device\u2019s clock. Sold and net come from your sales, with cost worked out first in, first out: an estimate, fixed once the week has closed. '
+        + 'Fees, wallet change and wallet at close are exact, from the wallet journal, which EVE keeps for 30 days. In buy orders is as this page last saw it that week.'));
+  }
+
   function pin(rows) {
     const at = Date.now();
     rows.forEach(r => { S.pins[r.id] = { price: r.plan.target, at }; });
@@ -1236,7 +1318,8 @@
       h('dl', { class: 'facts' },
         fact('Net after fees', L.short(m.week.net), 'estimate'),
         fact('Sold', L.short(m.week.gross), plural(m.week.units, 'unit')),
-        fact('Today', L.short(m.today.net), L.short(m.today.gross) + ' sold')),
+        fact('Today', L.short(m.today.net), L.short(m.today.gross) + ' sold'),
+        m.closes && fact('Realized net to date', h('a', { href: '#closes', onclick: e => { e.preventDefault(); const el = document.getElementById('closes'); if (el) el.scrollIntoView({ behavior: 'smooth' }); } }, L.short(m.closes.toDate)), m.closes.carried == null ? 'since ' + new Date(m.closes.since).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : 'with the tracker\u2019s earlier weeks')),
       h('div', { class: 'bars', role: 'list', 'aria-label': 'Net after fees per day, last 14 days' },
         m.days.map((d, i) => {
           const day = new Date(d.day).toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' });
@@ -1312,7 +1395,7 @@
         : h('p', { class: 'note' }, m.windowDays < C.staleDays ? 'Needs ' + C.staleDays + ' days of sales history; EVE has returned ' + Math.floor(m.windowDays) + '.' : 'Every line has sold in the last ' + C.staleDays + ' days and clears within a month.'));
   }
   function dataPanel() {
-    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Hangars', 'Planets', 'Kill feed', 'Item prices', 'Loot prices', 'Location', 'Skills and clones', 'Routes'];
+    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Wallet journal', 'Hangars', 'Planets', 'Kill feed', 'Item prices', 'Loot prices', 'Location', 'Skills and clones', 'Routes'];
     return h('section', { class: 'panel panel-data' }, h('h3', null, 'How fresh this is'),
       h('ul', { class: 'feeds' }, names.filter(n => S.feeds[n]).map(n => {
         const f = S.feeds[n];
@@ -1357,6 +1440,11 @@
     const m = S.ready ? build() : null;
     share(m);
     const y = window.scrollY;
+    const act = document.activeElement, typing = act && act.getAttribute && act.getAttribute('data-keep') ? { key: act.getAttribute('data-keep'), value: act.value, a: act.selectionStart, b: act.selectionEnd } : null;
+    if (typing) setTimeout(() => {          // a repaint must not take a half-typed figure away
+      const el = root.querySelector('[data-keep="' + typing.key + '"]');
+      if (el && document.activeElement !== el) { el.value = typing.value; el.focus({ preventScroll: true }); try { el.setSelectionRange(typing.a, typing.b); } catch (e) { /* not a text box */ } }
+    }, 0);
     if (S.view === 'wh' && window.Wh) {
       root.replaceChildren(demo ? h('p', { class: 'banner' }, 'Sample data. ', h('a', { href: './' }, 'Leave sample data')) : '', topView(m), window.Wh.view(paint, m ? lootView(m) : null));
       return window.scrollTo(0, y);
@@ -1365,7 +1453,7 @@
       demo ? h('p', { class: 'banner' }, 'Sample data. Routes are real, the orders and ISK are invented. ', h('a', { href: './' }, 'Leave sample data')) : '',
       topView(m),
       m ? h('main', { class: 'board' },
-        h('div', { class: 'stops' }, m.stops.length ? [tripView(m), tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m)]),
+        h('div', { class: 'stops' }, m.stops.length ? [tripView(m), tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m), closesView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m), closesView(m)]),
         h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);

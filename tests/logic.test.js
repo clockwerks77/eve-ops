@@ -373,3 +373,58 @@ test('trip plan: fewest jumps, pick-up before drop-off, and stops with no route'
   assert.equal(L.tripPlan(['A', 'Z'], dist), null);
   assert.equal(L.tripPlan([], dist).total, 0);
 });
+
+test('typed ISK figures', () => {
+  assert.equal(L.parseIsk('356.4M'), 356400000);
+  assert.equal(L.parseIsk('1.25b'), 1250000000);
+  assert.equal(L.parseIsk('450k'), 450000);
+  assert.equal(L.parseIsk('12,345,678'), 12345678);
+  assert.equal(L.parseIsk(' -3.2 M '), -3200000);
+  assert.equal(L.parseIsk('356.4M ISK'), 356400000);
+  assert.equal(L.parseIsk('0'), 0);
+  for (const bad of ['', 'abc', '12x', '1.2.3', 'M', null]) assert.equal(L.parseIsk(bad), null, String(bad));
+});
+
+test('weeks are named by their Monday and step by the calendar', () => {
+  const wed = new Date(2026, 10, 11, 15, 30).getTime();                 // Wednesday 11 November 2026
+  assert.equal(L.weekKey(wed), '2026-11-09');
+  assert.equal(L.weekStart('2026-11-09'), new Date(2026, 10, 9).getTime());
+  assert.equal(L.weekKey(L.weekAfter(L.weekStart('2026-11-09'))), '2026-11-16');
+  // across the autumn clock change the next week still starts on a Monday at 00:00
+  const oct = L.weekStart('2026-10-26');
+  assert.equal(new Date(L.weekAfter(oct)).getHours(), 0);
+  assert.equal(L.weekKey(L.weekAfter(oct)), '2026-11-02');
+});
+
+test('wallet journal for a week: kinds add up to the change, balances at both ends', () => {
+  const d = (day, h) => new Date(Date.UTC(2026, 10, day, h)).toISOString();
+  const j = [
+    { id: 1, date: d(8, 20), ref_type: 'market_transaction', amount: 5e6, balance: 100e6 },
+    { id: 2, date: d(9, 10), ref_type: 'market_transaction', amount: 20e6, balance: 120e6 },
+    { id: 3, date: d(9, 10), ref_type: 'transaction_tax', amount: -675000, balance: 119325000 },
+    { id: 4, date: d(10, 9), ref_type: 'market_escrow', amount: -30e6, balance: 89325000 },
+    { id: 5, date: d(11, 9), ref_type: 'brokers_fee', amount: -450000, balance: 88875000 },
+    { id: 6, date: d(12, 9), ref_type: 'planetary_export_tax', amount: -125000, balance: 88750000 },
+    { id: 7, date: d(13, 9), ref_type: 'player_donation', amount: 10e6, balance: 98750000 },
+    { id: 8, date: d(14, 9), ref_type: 'insurance', amount: 1e6, balance: 99750000 },
+    { id: 9, date: d(16, 9), ref_type: 'market_transaction', amount: 7e6, balance: 106750000 },
+  ];
+  const from = Date.UTC(2026, 10, 9), to = Date.UTC(2026, 10, 16);
+  const w = L.journalSpan(j.slice().reverse(), from, to);                 // ESI returns newest first
+  assert.equal(w.covered, true); assert.equal(w.open, 100e6); assert.equal(w.close, 99750000);
+  assert.equal(w.change, w.close - w.open);
+  assert.equal(w.sales + w.purchases + w.broker + w.tax + w.planets + w.transfers + w.other, w.change);
+  assert.deepEqual([w.sales, w.purchases, w.broker, w.tax, w.planets, w.transfers, w.other], [20e6, -30e6, -450000, -675000, -125000, 10e6, 1e6]);
+  // a journal that starts inside the week cannot vouch for the whole of it
+  const part = L.journalSpan(j.slice(3), from, to);
+  assert.equal(part.covered, false); assert.equal(part.open, null); assert.equal(part.close, 99750000);
+});
+
+test('tie-out: tied within the tolerance, and counted in a row from the newest week', () => {
+  const t = L.tieOut([{ net: 100, tracker: 99 }, { net: 100, tracker: 120 }, { net: 200, tracker: 201 }, { net: 300, tracker: 300 }], 0.02);
+  assert.deepEqual(t.rows.map(r => r.tied), [true, false, true, true]);
+  assert.equal(t.run, 2); assert.equal(t.rows[1].diff, -20);
+  // the newest week has no tracker figure yet: nothing is running
+  assert.equal(L.tieOut([{ net: 100, tracker: 100 }, { net: 100, tracker: null }], 0.02).run, 0);
+  assert.equal(L.tieOut([], 0.02).run, 0);
+});

@@ -310,6 +310,60 @@
     return 'unclear';
   }
 
+  // ------------------------------------------------------------ weekly closes
+  const pad2 = n => (n < 10 ? '0' : '') + n;
+  /** The name a week is kept under: its Monday, device time, as YYYY-MM-DD. */
+  function weekKey(ms) { const d = new Date(startOfWeek(ms)); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function weekStart(key) { const p = String(key).split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]).getTime(); }
+  /** Monday 00:00 of the week after the one starting at `ms` (a calendar step, so clock changes do not shift it). */
+  function weekAfter(ms) { const d = new Date(ms); d.setDate(d.getDate() + 7); return d.getTime(); }
+
+  /** A typed ISK figure: "356.4M", "1.25b", "450k", "12,345,678", "-3.2 M". A number, or null for anything else. */
+  function parseIsk(text) {
+    const m = String(text == null ? '' : text).replace(/[,\s]|isk/gi, '').match(/^([+-]?)(\d+(?:\.\d+)?|\.\d+)([kmb]?)$/i);
+    if (!m) return null;
+    const v = Number(m[2]) * { '': 1, k: 1e3, m: 1e6, b: 1e9 }[m[3].toLowerCase()];
+    return m[1] === '-' ? -v : v;
+  }
+
+  /**
+   * What the wallet journal says about the time from `from` up to `to`: where the wallet moved, by kind, and the balance at each end.
+   * The kinds add up to `change` exactly. `covered` is false when the journal does not reach back past `from`,
+   * in which case the sums cover only part of the span and `open` is unknown.
+   */
+  function journalSpan(journal, from, to) {
+    const rows = journal.map(e => ({ at: Date.parse(e.date), id: e.id, kind: e.ref_type, amount: e.amount || 0, balance: e.balance }))
+      .sort((a, b) => a.at - b.at || a.id - b.id);
+    const out = { sales: 0, purchases: 0, broker: 0, tax: 0, planets: 0, transfers: 0, other: 0, change: 0, open: null, close: null, covered: false, entries: 0 };
+    for (const e of rows) {
+      if (e.at < from) { out.open = e.balance; out.covered = true; }
+      if (e.at >= to) break;
+      out.close = e.balance;
+      if (e.at < from) continue;
+      out.entries++; out.change += e.amount;
+      const k = e.kind === 'market_transaction' ? (e.amount >= 0 ? 'sales' : 'purchases') : e.kind === 'market_escrow' ? 'purchases'
+        : e.kind === 'brokers_fee' ? 'broker' : e.kind === 'transaction_tax' ? 'tax' : /^planetary_/.test(e.kind) ? 'planets'
+        : /^(player_donation|player_trading|corporation_account_withdrawal)$/.test(e.kind) ? 'transfers' : 'other';
+      out[k] += e.amount;
+    }
+    return out;
+  }
+
+  /**
+   * The tie-out. `weeks` are closed weeks, oldest first, each { net, tracker } (tracker null when not entered).
+   * A week ties when the two figures differ by no more than `within` of the tracker's. `run` counts tied weeks in a row, ending at the newest.
+   */
+  function tieOut(weeks, within) {
+    const rows = weeks.map(w => {
+      if (w.tracker == null || w.net == null) return { diff: null, tied: null };
+      const diff = w.net - w.tracker;
+      return { diff, tied: Math.abs(diff) <= Math.abs(w.tracker) * within };
+    });
+    let run = 0;
+    for (let i = rows.length - 1; i >= 0 && rows[i].tied; i--) run++;
+    return { rows, run };
+  }
+
   /**
    * The order to visit a few stops in for the fewest jumps, ending wherever that leaves you.
    * dist(a, b) gives the jumps between two stops, with 'start' for where you are now; null means no route, which rules that order out.
@@ -530,7 +584,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, copyState, tripPlan, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
+    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, journalSpan, tieOut, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

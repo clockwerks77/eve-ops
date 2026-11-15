@@ -56,6 +56,9 @@ window.EVEOPS_CONFIG = {
   // A price change bigger than this share of your price is flagged "Big move" for you to judge
   // (dump or repricing?) instead of being listed as a routine change.
   bigMove: 0.02,
+  // Weekly close: a week ties out when the page's net is within this share of the figure typed in from the tracker.
+  // After `weeks` tied weeks in a row the page says it can take over as the ledger.
+  tieOut: { within: 0.02, weeks: 2 },
   // A sell line with no sale at its hub for this many days, on stock bought longer ago than that, is not urged to
   // "Change": the price is still offered, as "Slow line", because each change costs a fee the line may not earn back.
   slowFee: { days: 7 },

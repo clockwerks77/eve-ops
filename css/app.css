@@ -244,6 +244,13 @@ button { font: inherit; color: inherit; }
 .pi h2 { font-size: 1.3rem; font-weight: 600; }
 .pi-note { color: var(--dim); font-size: 0.9rem; margin-top: 0.2rem; }
 .pi-scroll { overflow-x: auto; margin-top: 0.7rem; }
+/* weekly close */
+.isk-in { width: 8.2rem; background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; padding: 0.15rem 0.4rem; font: inherit; text-align: right; }
+.isk-in::placeholder { color: color-mix(in srgb, var(--dim) 60%, transparent); }
+.closes-carry { margin-top: 0.6rem; font-size: 0.92rem; }
+.closes-carry .sub { display: inline; margin-left: 0.6rem; }
+.closes-table tr.is-open td { color: var(--dim); }
+.closes-table .neg { color: var(--bad); font-weight: 600; }
 .pi-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 .pi-table th { font-weight: 400; color: var(--dim); font-size: 0.82rem; text-align: right; padding: 0 0 0.25rem 1rem; white-space: nowrap; }
 .pi-table td { text-align: right; padding: 0.3rem 0 0.3rem 1rem; border-top: 1px solid var(--seam); white-space: nowrap; vertical-align: middle; }

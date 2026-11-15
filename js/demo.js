@@ -99,6 +99,14 @@
     const pick = sells[Math.floor(rnd() * sells.length)];
     tx.push({ transaction_id: tid++, date: iso(d * D), type_id: pick[0], location_id: pick[1], quantity: 2 + Math.floor(rnd() * 14), unit_price: pick[4], is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
   }
+  // older weeks, for the weekly close (its own random sequence, so the figures above stay as they were)
+  let seed2 = 11;
+  const rnd2 = () => { seed2 = (seed2 * 16807) % 2147483647; return seed2 / 2147483647; };
+  for (const row of sells) if (row[8] < 36) tx.push({ transaction_id: tid++, date: iso(36 * D), type_id: row[0], location_id: ST.jita, quantity: 300, unit_price: row[5], is_buy: true, is_personal: true, client_id: 1, journal_ref_id: tid });
+  for (let d = 14.2; d < 35; d += 0.3 + rnd2() * 0.5) {
+    const pick = sells[Math.floor(rnd2() * sells.length)];
+    tx.push({ transaction_id: tid++, date: iso(d * D), type_id: pick[0], location_id: pick[1], quantity: 2 + Math.floor(rnd2() * 12), unit_price: pick[4], is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
+  }
   // a fast line that is about to run out, and one that sold out
   for (let i = 0; i < 6; i++) tx.push({ transaction_id: tid++, date: iso((0.3 + i * 0.5) * D), type_id: 2488, location_id: ST.dodixie, quantity: 26, unit_price: 421300, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
   for (let i = 0; i < 4; i++) tx.push({ transaction_id: tid++, date: iso((0.4 + i * 0.9) * D), type_id: 380, location_id: ST.rens, quantity: 12, unit_price: 512000, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
@@ -155,6 +163,22 @@
 
   const planets = [1, 2, 3, 4, 5, 6].map(i => ({ planet_id: 40150000 + i, planet_type: ['barren', 'gas', 'temperate', 'lava', 'oceanic', 'storm'][i - 1], solar_system_id: 30002543, last_update: iso(34 * H), num_pins: 10, owner_id: CHAR, upgrade_level: 4 }));
 
+  // The wallet journal that goes with those sales and purchases: tax on each sale, a broker fee now and then, balances that end at the wallet.
+  const journal = [];
+  {
+    let jid = 5000000000;
+    const rows = tx.slice().sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+    rows.forEach((t, i) => {
+      const gross = t.quantity * t.unit_price;
+      journal.push({ id: jid++, date: t.date, ref_type: 'market_transaction', amount: t.is_buy ? -gross : gross });
+      if (!t.is_buy) journal.push({ id: jid++, date: t.date, ref_type: 'transaction_tax', amount: -Math.round(gross * 0.03375 * 100) / 100 });
+      if (!t.is_buy && i % 3 === 0) journal.push({ id: jid++, date: t.date, ref_type: 'brokers_fee', amount: -Math.round(gross * 0.0039 * 100) / 100 });
+    });
+    let bal = 6072843112.37;
+    for (let i = journal.length - 1; i >= 0; i--) { journal[i].balance = Math.round(bal * 100) / 100; bal -= journal[i].amount; }
+    journal.reverse();
+  }
+
   function answer(data, ttl, age) { return Promise.resolve({ data, fetched: now, modified: now - (age || 0), expires: Date.now() + ttl }); }
 
   function get(path, opts) {
@@ -173,6 +197,7 @@
     if (/\/ship\/$/.test(path)) return answer({ ship_item_id: 1, ship_name: 'Dawn Treader IV', ship_type_id: 12733 }, 5e3);
     if (/\/wallet\/$/.test(path)) return answer(6072843112.37, 2 * M, 40e3);
     if (/\/wallet\/transactions\/$/.test(path)) return answer(q.from_id ? [] : tx, 60 * M, 22 * M);
+    if (/\/wallet\/journal\/$/.test(path)) return answer(journal, 60 * M, 22 * M);
     if (/\/characters\/\d+\/orders\/$/.test(path)) return answer(orders, 20 * M, 9 * M);
     if (/\/orders\/history\/$/.test(path)) return answer([], 60 * M, 30 * M);
     if (/\/assets\/$/.test(path)) return answer([
