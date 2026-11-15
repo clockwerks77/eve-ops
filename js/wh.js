@@ -50,6 +50,12 @@
   const statics = id => (DATA.systems[id] || [[], -1])[0];
   const effect = id => { const e = (DATA.systems[id] || [[], -1])[1]; return e >= 0 ? DATA.effects[e] : null; };
   const hole = code => { const x = DATA.holes[code]; return x ? { dest: String(x[0]).toUpperCase().replace('HS', 'High').replace('LS', 'Low').replace('NS', 'Null'), life: x[1], mass: x[2], jump: x[3] } : null; };
+  /** What the system effect does at this class: [{ name, good, power }]. */
+  const fxOf = (id, cls) => {
+    const rows = effect(id) && DATA.fx ? DATA.fx[effect(id)] : null, i = /^C[1-6]$/.test(cls || '') ? Number(cls[1]) - 1 : -1;
+    return rows ? rows.map(r => ({ name: r[0], good: !!r[1], power: i >= 0 ? r[2][i] : r[2].join(' / ') })) : [];
+  };
+  const shipFit = kg => (!kg ? '' : kg <= 5e6 ? 'Frigates and destroyers' : kg <= 62e6 ? 'Up to battlecruisers' : kg <= 375e6 ? 'Up to battleships' : kg <= 1e9 ? 'Up to freighters' : 'Capitals fit');
   const staticText = code => { const x = hole(code); return x && x.dest ? code + ' to ' + x.dest + (x.life ? ', ' + x.life + ' h' : '') : code; };
 
   /** Where the pilot is. A change of system made while the page was watching becomes a link in the chain. */
@@ -90,11 +96,13 @@
     S.kills.set(id, Object.assign({ list: null, total: 0 }, hit, { at: Date.now(), err: null }));
     try {
       const raw = await (await fetch('https://zkillboard.com/api/kills/systemID/' + id + '/pastSeconds/604800/')).json();
-      const mails = (await Promise.all(raw.slice(0, 15).map(k => E.get('/killmails/' + k.killmail_id + '/' + k.zkb.hash + '/').then(x => ({ k, m: x.data }), () => null)))).filter(Boolean);
+      const mails = (await Promise.all(raw.slice(0, 40).map(k => E.get('/killmails/' + k.killmail_id + '/' + k.zkb.hash + '/').then(x => ({ k, m: x.data }), () => null)))).filter(Boolean);
       const ids = [];
       mails.forEach(x => { ids.push(x.m.victim.ship_type_id, x.m.victim.corporation_id, x.m.victim.alliance_id); const fb = x.m.attackers.find(a => a.final_blow) || {}; ids.push(fb.corporation_id, fb.alliance_id); });
       await names(ids).catch(() => {});
-      S.kills.set(id, { at: Date.now(), total: raw.length, list: mails.map(x => {
+      const hours = new Array(24).fill(0);
+      mails.forEach(x => { if (!x.k.zkb.npc) hours[new Date(x.m.killmail_time).getUTCHours()]++; });
+      S.kills.set(id, { at: Date.now(), total: raw.length, hours, list: mails.map(x => {
         const fb = x.m.attackers.find(a => a.final_blow) || {};
         return { id: x.k.killmail_id, at: Date.parse(x.m.killmail_time), ship: W.names[x.m.victim.ship_type_id] || 'Ship', victim: W.names[x.m.victim.alliance_id] || W.names[x.m.victim.corporation_id] || 'Unknown',
           by: W.names[fb.alliance_id] || W.names[fb.corporation_id] || (x.k.zkb.npc ? 'NPCs' : 'Unknown'), pilots: x.m.attackers.length, value: x.k.zkb.totalValue || 0, npc: !!x.k.zkb.npc };
@@ -140,10 +148,14 @@
     const order = ids.slice().sort((a, b) => (a === W.home ? -1 : b === W.home ? 1 : (W.systems[a].first || 0) - (W.systems[b].first || 0)));
     for (const id of order) if (!pos.has(id)) place(id);
     const cols = Math.max.apply(null, [0].concat(Array.from(pos.values()).map(p => p.x))) + 1;
-    const X = p => 12 + p.x * 168, Y = p => 12 + p.y * 62;
+    const X = p => 12 + p.x * 204, Y = p => 12 + p.y * 62;
     const here = S.loc && S.loc.solar_system_id;
-    return sv('svg', { class: 'wh-chain', width: cols * 168 + 8, height: Math.max(1, row) * 62 + 12, viewBox: '0 0 ' + (cols * 168 + 8) + ' ' + (Math.max(1, row) * 62 + 12), role: 'img', 'aria-label': 'Chain of connected systems' },
-      W.links.filter(l => pos.has(l.a) && pos.has(l.b)).map(l => sv('line', { x1: X(pos.get(l.a)) + 72, y1: Y(pos.get(l.a)) + 23, x2: X(pos.get(l.b)) + 72, y2: Y(pos.get(l.b)) + 23, class: 'wh-link' })),
+    return sv('svg', { class: 'wh-chain', width: cols * 204 + 8, height: Math.max(1, row) * 62 + 12, viewBox: '0 0 ' + (cols * 204 + 8) + ' ' + (Math.max(1, row) * 62 + 12), role: 'img', 'aria-label': 'Chain of connected systems' },
+      W.links.filter(l => pos.has(l.a) && pos.has(l.b)).map(l => {
+        const a = pos.get(l.a), b = pos.get(l.b), tag = [l.type, l.life === 'eol' ? 'EOL' : '', l.mass === 'crit' ? 'crit' : l.mass === 'half' ? 'reduced' : ''].filter(Boolean).join(' ');
+        return [sv('line', { x1: X(a) + 72, y1: Y(a) + 23, x2: X(b) + 72, y2: Y(b) + 23, class: 'wh-link' + (l.life === 'eol' || l.mass === 'crit' ? ' is-warn' : '') }),
+          tag ? sv('text', { x: (X(a) + 144 + X(b)) / 2, y: (Y(a) + Y(b)) / 2 + 17, class: 'wh-tag', 'text-anchor': 'middle' }, tag) : null];
+      }),
       ids.map(id => {
         const s = W.systems[id], p = pos.get(id), k = S.kills.get(id);
         const tip = s.name + ', ' + (s.cls || '') + (effect(id) ? ', ' + effect(id) : '') + (statics(id).length ? ', statics ' + statics(id).map(staticText).join('; ') : '')
@@ -173,10 +185,42 @@
         return sv('g', Object.assign({ class: 'wh-planet' }, say(p.name + ', ' + (p.d / 1.496e11).toFixed(1) + ' AU from the sun, ' + p.moons + (p.moons === 1 ? ' moon' : ' moons'))),
           sv('circle', { cx: q[0], cy: q[1], r: 5.5 }), sv('text', { x: q[0] + 8, y: q[1] + 4 }, label)); }),
       Object.keys(s.structures || {}).map(k => { const st = s.structures[k], q = at(rOf(Math.hypot(st.x, st.z)), Math.atan2(st.z, st.x));
-        return sv('rect', Object.assign({ x: q[0] - 5, y: q[1] - 5, width: 10, height: 10, class: 'wh-structure' }, say(st.name + ', ' + (Math.hypot(st.x, st.z) / 1.496e11).toFixed(1) + ' AU from the sun'))); }),
+        const label = st.name.indexOf(' - ') >= 0 ? st.name.slice(st.name.indexOf(' - ') + 3) : st.name;
+        return sv('g', Object.assign({ class: 'wh-structure' }, say(st.name + ', ' + (Math.hypot(st.x, st.z) / 1.496e11).toFixed(1) + ' AU from the sun')),
+          sv('rect', { x: q[0] - 5, y: q[1] - 5, width: 10, height: 10 }), sv('text', { x: q[0] + 9, y: q[1] + 4 }, label.length > 28 ? label.slice(0, 27) + '\u2026' : label)); }),
       sigs.map((g, i) => { const q = at(164, Math.PI / 2 - (i / sigs.length) * 2 * Math.PI);
         return sv('g', Object.assign({ class: 'wh-sig' }, say(g.id + ', ' + groupName(g.group) + (g.name ? ', ' + g.name : '') + ', first seen ' + ago(g.first) + (g.fresh ? ', new' : '') + '. Position unknown.')),
           sv('circle', { cx: q[0], cy: q[1], r: g.fresh ? 7 : 5.5, fill: GTONE[g.group] || GTONE[''] }), sv('text', { x: q[0], y: q[1] - 9, 'text-anchor': 'middle' }, g.id.slice(0, 3))); }));
+  }
+
+  function infoCol(id, s) {
+    const fx = fxOf(id, s.cls), st = statics(id), structs = Object.keys(s.structures || {}).map(k => s.structures[k]);
+    const moons = (s.planets || []).reduce((n, p) => n + p.moons, 0);
+    return h('div', { class: 'wh-info' },
+      h('h4', null, 'Effect' + (effect(id) ? ': ' + effect(id) : '')),
+      effect(id) ? h('ul', { class: 'wh-fx' }, fx.map(x => h('li', { class: x.good ? 'is-good' : 'is-bad' }, h('span', null, x.name), h('b', null, x.power))))
+        : h('p', { class: 'note' }, isJ(id) ? 'None. This system has no wormhole effect.' : 'None. Known space has no wormhole effect.'),
+      st.length ? [h('h4', null, 'Statics'), h('ul', { class: 'timers' }, st.map(c => { const x = hole(c) || {};
+        return h('li', null, h('span', { class: 't-what' }, c + ' to ' + (x.dest || 'unknown'), h('span', { class: 'sub' }, x.life ? 'lasts ' + x.life + ' h' : '')),
+          h('span', { class: 't-when' }, shipFit(x.jump), h('span', { class: 'sub' }, x.mass ? num(x.mass / 1e6) + 'M kg in total' : ''))); }))] : null,
+      h('h4', null, 'In this system'),
+      h('ul', { class: 'timers' },
+        h('li', null, h('span', { class: 't-what' }, 'Planets'), h('span', { class: 't-when' }, (s.planets || []).length + ', with ' + moons + (moons === 1 ? ' moon' : ' moons'))),
+        structs.map(x => h('li', null, h('span', { class: 't-what' }, x.name), h('span', { class: 't-when' }, (Math.hypot(x.x, x.z) / 1.496e11).toFixed(1) + ' AU out')))));
+  }
+  function linkPanel(id) {
+    const ls = W.links.filter(l => l.a === id || l.b === id);
+    if (!ls.length) return null;
+    const pick = (l, key, opts) => h('select', { 'aria-label': key, onchange: e => { l[key] = e.target.value; save(); S.repaint(); } },
+      opts.map(o => h('option', { value: o[0], selected: (l[key] || '') === o[0] }, o[1])));
+    return h('section', { class: 'panel' }, h('h3', null, 'Connections'), h('ul', { class: 'wh-links' }, ls.map(l => {
+      const o = W.systems[l.a === id ? l.b : l.a] || { name: 'Unknown' }, x = hole(l.type), dies = x && x.life ? l.at + x.life * 36e5 : null;
+      const types = [['', 'Type unknown'], ['K162', 'K162, exit side']].concat(Array.from(new Set(statics(l.a).concat(statics(l.b)))).map(c => [c, staticText(c)]));
+      return h('li', null, h('b', null, 'To ' + o.name + (o.cls ? ' (' + o.cls + ')' : '')),
+        h('span', { class: 'sub' }, 'first seen ' + ago(l.at) + (dies ? (dies > Date.now() ? ', gone within ' + L.span(dies - Date.now()) : ', past its lifetime') : '')),
+        h('span', { class: 'wh-picks' }, pick(l, 'type', types), pick(l, 'life', [['', 'Lifetime fresh'], ['eol', 'End of life']]), pick(l, 'mass', [['', 'Mass stable'], ['half', 'Mass reduced'], ['crit', 'Mass critical']]),
+          h('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: () => { W.links = W.links.filter(z => z !== l); save(); S.repaint(); } }, 'Remove')));
+    })));
   }
 
   // ------------------------------------------------------------------ view
@@ -203,22 +247,27 @@
       h('div', { class: 'stops' }, head,
         h('section', { class: 'wh-block' }, h('h3', null, 'Chain'), Object.keys(W.systems).length ? chainSvg() : null,
           h('p', { class: 'note' }, 'A system is added each time ' + me.name + ' jumps while this page is open. Jumps through stargates are not drawn. Select a system to see it below and at right.')),
-        h('section', { class: 'wh-block' }, h('h3', null, s.name + ', system map'), h('div', { class: 'wh-map' }, systemSvg(s, readout), readout),
+        h('section', { class: 'wh-block' }, h('h3', null, s.name + ', system map'), h('div', { class: 'wh-split' }, h('div', { class: 'wh-map' }, systemSvg(s, readout), readout), infoCol(id, s)),
           h('p', { class: 'note' }, 'Planets and any structure this pilot has docked in sit at their true bearing from the sun, with distances compressed. Signatures are on the outer ring in the order pasted: EVE gives no position for them.'))),
       h('aside', { class: 'side' },
         h('section', { class: 'panel' }, h('h3', null, s.name),
           h('dl', { class: 'facts' },
             h('div', { class: 'fact' }, h('dt', null, 'Class'), h('dd', null, s.cls || '')),
-            effect(id) ? h('div', { class: 'fact' }, h('dt', null, 'Effect'), h('dd', null, effect(id))) : null,
+            h('div', { class: 'fact' }, h('dt', null, 'Effect'), h('dd', null, effect(id) || 'None')),
             statics(id).length ? h('div', { class: 'fact' }, h('dt', null, 'Statics'), h('dd', null, statics(id).map(c => h('span', { class: 'sub-line' }, staticText(c))))) : null,
             h('div', { class: 'fact' }, h('dt', null, 'Planets'), h('dd', null, (s.planets || []).length)),
             s.seen ? h('div', { class: 'fact' }, h('dt', null, 'Last here'), h('dd', null, ago(s.seen))) : null)),
+        linkPanel(id),
         h('section', { class: 'panel' }, h('h3', null, 'Kills, last 7 days'),
           !k ? h('p', { class: 'note' }, 'Not loaded yet.') : k.err ? h('p', { class: 'note' }, k.err) : !k.list ? h('p', { class: 'note' }, 'Loading from zKillboard.')
             : !k.list.length ? h('p', { class: 'note' }, 'None on zKillboard.')
             : [h('p', { class: 'wh-killsum' }, (k.total >= 200 ? '200 or more' : num(k.total)) + (k.total === 1 ? ' kill' : ' kills') + ', ' + k.list.filter(x => Date.now() - x.at < 864e5).length + (k.list.length < k.total ? ' or more' : '') + ' in the last 24 h'),
               h('ul', { class: 'feed' }, k.list.slice(0, 8).map(x => h('li', { class: x.npc ? 'tone-calm' : 'tone-bad' },
                 h('span', null, x.ship + ' of ' + x.victim), h('span', { class: 'sub' }, ago(x.at) + ', lost to ' + (x.npc ? 'NPCs' : x.pilots + (x.pilots === 1 ? ' pilot' : ' pilots') + ' (' + x.by + ')') + ', ' + L.short(x.value)))))],
+          k && k.hours && k.list && k.list.length ? [h('div', { class: 'bars wh-hours', role: 'list', 'aria-label': 'Player kills by hour of day, EVE time' }, k.hours.map((n, hr) =>
+            h('span', { class: 'bar', role: 'listitem', tabindex: 0, 'aria-label': hr + ':00, ' + n + ' kills' }, h('span', { class: 'tip' }, h('b', null, String(hr).padStart(2, '0') + ':00 EVE time'), h('span', null, n + (n === 1 ? ' kill' : ' kills'))),
+              h('span', { class: 'col' }, h('i', { style: { height: Math.max(2, Math.round(n / Math.max(1, Math.max.apply(null, k.hours)) * 100)) + '%' } })), h('span', { class: 'day' }, hr % 6 === 0 ? String(hr).padStart(2, '0') : '')))),
+            h('p', { class: 'note' }, 'Player kills by hour of day, EVE time, from the newest ' + k.list.length + '.')] : null,
           h('p', { class: 'note' }, 'From zKillboard, which can run hours behind. EVE publishes no kill data for wormhole space.')),
         h('section', { class: 'panel' }, h('h3', null, 'Signatures in ' + s.name),
           counts.length ? h('ul', { class: 'wh-counts' }, counts.map(x => h('li', null, h('i', { style: { background: GTONE[x[0]] } }), x[1] + ' ' + groupName(x[0])))) : null,
@@ -242,10 +291,10 @@
       30002053: { id: 30002053, name: 'Hek', cls: 'High', first: t - 8e6, seen: t - 5e6, planets: [], sigs: [], structures: {} },
       30002718: { id: 30002718, name: 'Rancer', cls: 'Low', first: t - 7e6, seen: t - 4e6, planets: [], sigs: [], structures: {} },
     };
-    W.links = [{ a: 31002318, b: 30002053, at: t }, { a: 31002318, b: 30002718, at: t }];
+    W.links = [{ a: 31002318, b: 30002053, at: t - 5 * 36e5, type: 'E175', life: 'eol' }, { a: 31002318, b: 30002718, at: t - 36e5 }];
     W.home = 31002318; W.names = { 11188: 'Stratios' };
     S.loc = { solar_system_id: 31002318, structure_id: 1 }; S.ship = { ship_type_id: 11188, ship_name: 'Deep Dive' }; S.sel = 31002318;
-    S.kills.set(31002318, { at: t, total: 3, list: [
+    S.kills.set(31002318, { at: t, total: 3, hours: [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 3, 1, 0, 0], list: [
       { at: t - 3 * 36e5, ship: 'Heron', victim: 'Sample Explorers', by: 'Sample Hunters', pilots: 2, value: 41e6, npc: false },
       { at: t - 30 * 36e5, ship: 'Venture', victim: 'Sample Miners', by: 'Sample Hunters', pilots: 1, value: 4.2e6, npc: false },
       { at: t - 70 * 36e5, ship: 'Drake', victim: 'Sample Ratters', by: 'NPCs', pilots: 3, value: 96e6, npc: true }] });

@@ -44,8 +44,8 @@ window.EVEOPS_CONFIG = {
   // Planetary products are sold at zero cost basis.
   zeroCostTypes: [2329, 3693, 9830, 9832, 2312, 3775],
 
-  // Restock shortlist: lines with this many days of stock or fewer, that sold at least minWeek units in 7 days.
-  restock: { days: 4, minWeek: 5 },
+  // Restock shortlist: lines with this many days of stock or fewer, that sold at least minWeek units in 7 days. Lines netting under minMargin are listed but not offered a bid.
+  restock: { days: 4, minWeek: 5, minMargin: 0.10 },
   // Hauler cargo in m3 (the fitted figure; change it on the page whenever the fit changes).
   haul: { cargo: 11016 },
 

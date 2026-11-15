@@ -104,7 +104,7 @@
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, wantWake: false, wake: null,
-    prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [],
+    prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [], scout: null,
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
   const me = () => '/characters/' + S.who.id;
@@ -235,6 +235,15 @@
     const r = await E.get('/universe/system_kills/');
     S.kills = new Map(r.data.map(k => [k.system_id, k])); feed('Kill feed', r);
   }
+  /** The wormhole pilot, if signed in: their wallet, assets, orders and skill queue for the combined figures. */
+  async function loadScout() {
+    const sc = demo ? null : E.who('scout');
+    if (!sc) { S.scout = null; return; }
+    const base = '/characters/' + sc.id, a = { auth: 'scout' };
+    const r = await Promise.all([E.get(base + '/wallet/', a), E.get(base + '/assets/', a), E.get(base + '/skillqueue/', a), E.get(base + '/orders/', a)]);
+    await resolveNames(r[2].data.map(q => q.skill_id)).catch(() => {});
+    S.scout = { name: sc.name, wallet: r[0].data, assets: r[1].data, queue: r[2].data, orders: r[3].data };
+  }
   async function loadPrices() {
     const r = await E.get('/markets/prices/');
     S.prices = new Map(r.data.map(x => [x.type_id, x.average_price || x.adjusted_price || 0])); feed('Item prices', r);
@@ -355,7 +364,7 @@
       await resolveNames(ids).catch(() => {});
       S.ready = true; paint();
       await load('Planets', loadPlanets);
-      await Promise.all([load('Market books', loadBooks), load('Routes', loadRoutes), load('Item prices', loadPrices)]);
+      await Promise.all([load('Market books', loadBooks), load('Routes', loadRoutes), load('Item prices', loadPrices), load('Second character', loadScout)]);
       await loadReach().catch(() => {});
       paint();
       await loadHistory().catch(() => {});
@@ -409,7 +418,8 @@
       if (days > C.restock.days) return;
       const bid = jitaBid(type), coming = (onBid.get(type) || 0) + (jitaHang.get(type) || 0);
       const net = bid != null && hubPrice != null ? hubPrice * NET - bid : null;
-      restock.push({ type, name: nameOf(type), hub: hubName(loc), left, perDay: d7 / 7, days, bid, coming, want: Math.max(0, Math.round(d7) - left - coming), net, margin: net != null && bid ? net / bid : null });
+      const margin = net != null && bid ? net / bid : null;
+      restock.push({ type, name: nameOf(type), hub: hubName(loc), left, perDay: d7 / 7, days, bid, coming, want: Math.max(0, Math.round(d7) - left - coming), net, margin, thin: margin != null && margin < C.restock.minMargin });
     };
 
     // pins that have served their purpose
@@ -547,6 +557,15 @@
       held += (S.prices.get(a.type_id) || 0) * a.quantity;
     }
     const wealth = S.wallet == null ? null : S.wallet + escrow + listed + held;
+    let scout = null;
+    if (S.scout) {
+      let sheld = 0;
+      for (const a of S.scout.assets) if (!a.is_blueprint_copy) sheld += (S.prices.get(a.type_id) || 0) * a.quantity;
+      const sorders = sum(S.scout.orders, o => (o.is_buy_order ? o.escrow || 0 : o.price * o.volume_remain));
+      const sq = S.scout.queue.filter(x => x.finish_date && Date.parse(x.finish_date) > now).sort((a, b) => a.queue_position - b.queue_position);
+      scout = { name: S.scout.name, wallet: S.scout.wallet, held: sheld, wealth: S.scout.wallet + sheld + sorders,
+        queue: sq.map(x => ({ name: nameOf(x.skill_id), level: x.finished_level, done: Date.parse(x.finish_date) })), paused: S.scout.queue.filter(x => !x.finish_date).length };
+    }
 
     const sellHub = C.hubs.find(x => x.station === C.pi.sellStation) || C.hubs[0];
     const colonies = S.planets.filter(p => p.product && p.units).map(p => {
@@ -571,7 +590,7 @@
       const p = e[0].split(':').map(Number);
       consider(p[1], p[0], 0, e[1], ask(p[1], hubOf.get(p[0])));
     }
-    restock.sort((a, b) => a.days - b.days || (b.net || 0) * b.perDay - (a.net || 0) * a.perDay);
+    restock.sort((a, b) => (a.thin - b.thin) || a.days - b.days || (b.net || 0) * b.perDay - (a.net || 0) * a.perDay);
 
     // ---- haul manifest: what is waiting in the Jita hangar and where each item sells
     const away = C.hubs.filter(hb => hb.station !== C.jita.station);
@@ -628,7 +647,7 @@
     return {
       now, stops: list, slow: slow.slice(0, 8), tab: S.tab, pi,
       restock: restock.slice(0, 12), haul, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
-      wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0,
+      wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0, scout, both: wealth != null && scout ? wealth + scout.wealth : null,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
       today: L.summarize(led.sales, L.startOfDay(now), Infinity),
@@ -826,9 +845,9 @@
           h('td', { class: r.left ? '' : 'neg' }, r.left ? num(r.left) : 'Sold out'),
           h('td', null, r.perDay.toFixed(1)), h('td', null, r.left ? r.days.toFixed(1) : ''),
           h('td', null, r.coming ? num(r.coming) : ''),
-          h('td', null, r.want ? num(r.want) : h('span', { class: 'sub' }, 'covered')),
-          h('td', null, r.net == null ? '' : [h('span', { class: r.net < 0 ? 'neg' : '' }, L.short(r.net)), h('span', { class: 'sub' }, Math.round(r.margin * 100) + '%')]),
-          h('td', null, r.bid != null && r.want ? priceBtn(r.bid) : '')))))),
+          h('td', null, r.thin ? h('span', { class: 'sub' }, 'margin too thin') : r.want ? num(r.want) : h('span', { class: 'sub' }, 'covered')),
+          h('td', null, r.net == null ? '' : [h('span', { class: r.thin ? 'neg' : '' }, L.short(r.net)), h('span', { class: 'sub' }, Math.round(r.margin * 100) + '%')]),
+          h('td', null, r.bid != null && r.want && !r.thin ? priceBtn(r.bid) : '')))))),
       h('p', { class: 'note' }, 'Units to bid is a week of your sales less what is left, already on bid, or waiting in the Jita hangar. The bid is one legal tick over the top Jita bid; net each is at the hub price after fees.'));
   }
   function feedPanel(m) {
@@ -910,7 +929,9 @@
         fact('In buy orders', L.isk(Math.round(m.escrow)), plural(m.bidCount, 'bid')),
         fact('Listed, at your prices', L.isk(Math.round(m.listed))),
         fact('Hangars and ships', m.priced ? L.isk(Math.round(m.held)) : '', m.priced ? 'at EVE average prices' : 'loading prices'),
-        h('div', { class: 'fact fact-total' }, h('dt', null, 'Overall wealth'), h('dd', null, m.wealth == null ? '' : L.isk(Math.round(m.wealth))))),
+        h('div', { class: 'fact fact-total' }, h('dt', null, m.scout ? 'Overall wealth, ' + S.who.name : 'Overall wealth'), h('dd', null, m.wealth == null ? '' : L.isk(Math.round(m.wealth)))),
+        m.scout && fact(m.scout.name, L.isk(Math.round(m.scout.wealth)), 'wallet ' + L.short(m.scout.wallet) + ', hangars and ships ' + L.short(m.scout.held)),
+        m.both != null && h('div', { class: 'fact fact-total' }, h('dt', null, 'Both characters'), h('dd', null, L.isk(Math.round(m.both))))),
       h('dl', { class: 'facts facts-more' },
         fact('Listed, at cost', L.isk(Math.round(m.listedCost)), m.uncosted ? plural(m.uncosted, 'unit') + ' without a cost' : 'estimate'),
         m.slots && fact('Order slots', m.slots.used + ' of ' + m.slots.max)));
@@ -925,7 +946,7 @@
   }
   function skillPanel(m) {
     const q = m.queue;
-    return h('section', { class: 'panel' }, h('h3', null, 'Skill Queue'),
+    return h('section', { class: 'panel' }, h('h3', null, 'Skill Queue' + (m.scout ? ', ' + S.who.name : '')),
       q.length ? [h('ul', { class: 'timers' }, q.slice(0, 6).map((x, i) => h('li', null,
         h('span', { class: 't-what' }, x.name + ' ' + roman[x.level], h('span', { class: 'sub' }, i === 0 ? 'training now' : 'queued')),
         h('span', { class: 't-when' }, 'Done ', live('until', x.done), h('span', { class: 'sub' }, clock(x.done)))))),
@@ -935,6 +956,16 @@
             h('span', { class: 't-when' }, 'Paused')))),
           h('p', { class: 'note' }, 'This character is not training. ' + plural(m.paused.length, 'skill') + ' in the queue, paused.')]
         : h('ul', { class: 'timers' }, h('li', { class: S.skills ? 'is-soon' : '' }, h('span', { class: 't-what' }, 'Nothing training'), h('span', { class: 't-when' }, S.skills ? 'Queue is empty' : 'Loading'))));
+  }
+  function scoutSkills(m) {
+    const sc = m.scout;
+    if (!sc) return null;
+    return h('section', { class: 'panel' }, h('h3', null, 'Skill Queue, ' + sc.name),
+      sc.queue.length ? [h('ul', { class: 'timers' }, sc.queue.slice(0, 6).map((x, i) => h('li', null,
+        h('span', { class: 't-what' }, x.name + ' ' + roman[x.level], h('span', { class: 'sub' }, i === 0 ? 'training now' : 'queued')),
+        h('span', { class: 't-when' }, 'Done ', live('until', x.done), h('span', { class: 'sub' }, clock(x.done)))))),
+        h('p', { class: 'note' }, (sc.queue.length > 6 ? plural(sc.queue.length - 6, 'more skill') + ' after these. ' : '') + 'Queue ends ' + new Date(sc.queue[sc.queue.length - 1].done).toLocaleString('en-CA', { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '.')]
+        : h('ul', { class: 'timers' }, h('li', { class: sc.paused ? '' : 'is-soon' }, h('span', { class: 't-what' }, 'Nothing training'), h('span', { class: 't-when' }, sc.paused ? 'Queue is paused' : 'Queue is empty'))));
   }
   function clonePanel(m) {
     const c = m.clone;
@@ -979,7 +1010,7 @@
       h('nav', { class: 'views', 'aria-label': 'Views' }, [['trade', 'Trading'], ['wh', 'Wormholes']].map(v =>
         h('button', { type: 'button', class: 'view' + (S.view === v[0] ? ' is-on' : ''), 'aria-pressed': S.view === v[0] ? 'true' : 'false', onclick: () => setView(v[0]) }, v[1]))),
       m && h('dl', { class: 'purse' },
-        h('div', null, h('dt', null, 'Overall wealth'), h('dd', { title: m.wealth == null ? '' : L.isk(Math.round(m.wealth)) }, m.wealth == null ? '' : L.short(m.wealth))),
+        h('div', null, h('dt', null, m.both != null ? 'Overall wealth, both' : 'Overall wealth'), h('dd', { title: m.wealth == null ? '' : L.isk(Math.round(m.both != null ? m.both : m.wealth)) }, m.wealth == null ? '' : L.short(m.both != null ? m.both : m.wealth))),
         h('div', null, h('dt', null, 'Wallet'), h('dd', { title: m.wallet == null ? '' : L.isk(m.wallet) }, m.wallet == null ? '' : L.short(m.wallet))),
         h('div', null, h('dt', null, 'In buy orders'), h('dd', null, L.short(m.escrow))),
         h('div', null, h('dt', null, 'Net since Monday'), h('dd', null, L.short(m.week.net)))),
@@ -1007,7 +1038,7 @@
       topView(m),
       m ? h('main', { class: 'board' },
         h('div', { class: 'stops' }, m.stops.length ? [tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m)]),
-        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), clonePanel(m), slowPanel(m), dataPanel()))
+        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);
   }

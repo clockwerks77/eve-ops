@@ -308,7 +308,8 @@ button { font: inherit; color: inherit; }
 .wh-sun { fill: var(--isk); }
 .wh-planet circle { fill: var(--calm); }
 .wh-planet text, .wh-sig text { fill: var(--dim); font-size: 10px; }
-.wh-structure { fill: var(--ink); }
+.wh-structure rect { fill: var(--ink); }
+.wh-structure text { fill: var(--ink); font-size: 10px; }
 .wh-system [tabindex] { outline: none; cursor: default; }
 .wh-system [tabindex]:hover, .wh-system [tabindex]:focus { filter: brightness(1.6); }
 .wh-readout { min-height: 1.4rem; font-weight: 500; }
@@ -317,3 +318,18 @@ button { font: inherit; color: inherit; }
 .wh-counts i { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; margin-right: 0.35rem; }
 .wh-paste { width: 100%; background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; padding: 0.4rem; font: inherit; font-size: 0.9rem; resize: vertical; }
 .sub-line { display: block; }
+.wh-split { display: grid; grid-template-columns: minmax(0, 26rem) minmax(14rem, 1fr); gap: 0.6rem 2rem; align-items: start; }
+.wh-system { width: 100%; }
+.wh-info h4 { font-size: 1rem; font-weight: 600; margin: 0.9rem 0 0.35rem; }
+.wh-info h4:first-child { margin-top: 0; }
+.wh-fx li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; padding: 0.12rem 0; }
+.wh-fx b { font-weight: 600; }
+.wh-fx .is-good b { color: var(--lead); } .wh-fx .is-bad b { color: var(--warn); }
+.wh-link.is-warn { stroke: var(--warn); stroke-dasharray: 5 4; }
+.wh-tag { fill: var(--ink); font-size: 10px; paint-order: stroke; stroke: var(--void); stroke-width: 3px; }
+.wh-links li { padding: 0.45rem 0; border-top: 1px solid var(--seam); }
+.wh-links li:first-child { border-top: 0; padding-top: 0; }
+.wh-picks { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.35rem; }
+.wh-picks select { background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; font: inherit; font-size: 0.86rem; padding: 0.1rem 0.2rem; max-width: 100%; }
+.wh-hours { height: 3.2rem; }
+@media (max-width: 46rem) { .wh-split { grid-template-columns: minmax(0, 1fr); } }
