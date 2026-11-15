@@ -815,7 +815,7 @@
       const lists = new Map();                              // already in the hold: units to list at the hub where each sells best
       for (const r of holdRows) { const to = byName.get(r.best); if (to) lists.set(to, (lists.get(to) || 0) + r.qty); }
       const bids = restock.slice(0, 12).filter(r => r.bid != null && r.want && !r.thin).length;
-      const viaJita = haulRows.length > 0 && list.some(s => s.id === jita) && !S.tripSkip.has(jita);
+      const viaJita = haulRows.length > 0 && list.some(s => s.id === jita) && !S.tripSkip.has(String(jita));
       // what there is to do at a hub, each with a tone so the plan can be read by colour
       const jobsAt = s => {
         const jobs = [];
@@ -838,7 +838,7 @@
           withWork.push({ key: st.id + ':drop', s: st, jobs: [drop], again: true });
         } else if (jobs.length) withWork.push({ key: drop ? st.id + ':drop' : String(st.id), s: st, jobs });
       }
-      const wanted = withWork.filter(x => !S.tripSkip.has(x.s.id));
+      const wanted = withWork.filter(x => !S.tripSkip.has(x.key));          // a visit is left out by its own key, so a return visit can go while the first stays
       if (wanted.length > 1 && !Object.keys(S.legs).length) return null;          // hub-to-hub routes are still loading
       const idOf = key => (key === 'start' ? key : Number(String(key).split(':')[0]));
       const path = (a, b) => {                       // system by system, in travel order
@@ -854,12 +854,11 @@
       const plan = going.length ? L.tripPlan(going.map(x => x.key), dist, going.filter(x => /:drop$/.test(x.key)).map(x => [String(jita), x.key])) : null;
       const stopsOut = plan ? plan.order.map((key, i) => {
         const x = going.find(g => g.key === key), hops = path(i ? plan.order[i - 1] : 'start', key) || [];
-        return { id: x.s.id, short: x.s.short, jobs: x.jobs, here: x.s.docked && i === 0, again: !!x.again, jumps: plan.legs[i], hops: hops.slice(1), hot: hops.slice(1).filter(y => y.ship + y.pod > 0).length };
+        return { id: x.s.id, key: x.key, short: x.s.short, jobs: x.jobs, here: x.s.docked && i === 0, again: !!x.again, jumps: plan.legs[i], hops: hops.slice(1), hot: hops.slice(1).filter(y => y.ship + y.pod > 0).length };
       }) : [];
-      const seen = new Set();
       return {
         stops: stopsOut, total: plan ? plan.total : 0, safe: S.tripSafe, stuck: going.length > 0 && !plan,
-        skipped: withWork.filter(x => S.tripSkip.has(x.s.id) && !seen.has(x.s.id) && seen.add(x.s.id)).map(x => ({ id: x.s.id, short: x.s.short })),
+        skipped: withWork.filter(x => S.tripSkip.has(x.key)).map(x => ({ key: x.key, short: x.s.short + (x.again ? ' again' : '') })),
         lost: Array.from(new Set(lost.map(x => x.s.short))),
         idle: list.filter(st => !withWork.some(x => x.s === st)).map(st => st.short),
       };
@@ -1170,7 +1169,7 @@
     const t = m.trip;
     if (!t || (!t.stops.length && !t.skipped.length && !t.lost.length)) return null;
     const pick = id => { S.tab = id; S.follow = false; paint(); };
-    const skip = (id, on) => { if (on) S.tripSkip.add(id); else S.tripSkip.delete(id); paint(); };
+    const skip = (key, on) => { if (on) S.tripSkip.add(key); else S.tripSkip.delete(key); paint(); };
     const keep = () => { if (!demo) E.store.set('eveops.trip', { safe: S.tripSafe, open: S.tripOpen }); paint(); };
     const mode = safe => { S.tripSafe = safe; keep(); };
     const next = t.stops.find(x => !x.here);
@@ -1195,11 +1194,11 @@
           h('span', { class: 'trip-at' }, h('i', { class: 'trip-dot' }),
             h('button', { type: 'button', class: 'trip-name', onclick: () => pick(x.id) }, x.short, x.again ? ' again' : ''),
             x.here ? h('span', { class: 'trip-here' }, 'here') : null,
-            h('button', { type: 'button', class: 'trip-skip', title: 'Leave ' + x.short + ' out of this trip', 'aria-label': 'Leave ' + x.short + ' out of this trip', onclick: () => skip(x.id, true) }, '\u00d7')),
+            h('button', { type: 'button', class: 'trip-skip', title: 'Leave ' + x.short + (x.again ? ' again' : '') + ' out of this trip', 'aria-label': 'Leave ' + x.short + (x.again ? ' again' : '') + ' out of this trip', onclick: () => skip(x.key, true) }, '\u00d7')),
           h('ul', { class: 'trip-jobs' }, x.jobs.map(job)))))) : null,
       t.lost.length ? h('p', { class: 'note neg' }, 'No route from here to ' + t.lost.join(', ') + '.') : null,
       t.skipped.length || t.idle.length ? h('p', { class: 'note' },
-        t.skipped.length ? ['Left out by you: ', t.skipped.map((x, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'linkish', onclick: () => skip(x.id, false) }, x.short + ' (put back)')]), '. '] : null,
+        t.skipped.length ? ['Left out by you: ', t.skipped.map((x, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'linkish', onclick: () => skip(x.key, false) }, x.short + ' (put back)')]), '. '] : null,
         t.idle.length ? 'Nothing to do in ' + t.idle.join(', ') + '.' : null) : null,
       t.stops.length > 1 ? h('p', { class: 'note' }, 'One square per system on the way, coloured by security. A red cap, counted as "hot", marks ships or pods lost there in the last hour.') : null]);
   }
