@@ -147,7 +147,8 @@ object Auth {
             }
             if (code !in 200..299) {
                 val why = json.optString("error_description").ifEmpty { json.optString("error") }
-                throw Status(code, why.ifEmpty { "EVE answered $code." })
+                // EVE answers a code it does not recognise with a bare 500 page, not with a reason.
+                throw Status(code, why.ifEmpty { "EVE's sign-in server did not accept that ($code). Start the sign-in again." })
             }
             return json
         } finally {

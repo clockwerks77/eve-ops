@@ -39,9 +39,34 @@ A second view for a second character (signed in separately as the "wormhole pilo
 
 - **Tracking**: the pilot's system is read every 15 seconds. A change of system made while the page is open becomes a link in the chain; stargate jumps are not drawn. The chain is kept in this browser.
 - **Per system**: class (from the region), effect and statics (bundled table), kills over the last 7 days from zKillboard (EVE publishes none for wormhole space), and the signatures you paste from the probe scanner (Ctrl+A, Ctrl+C), grouped by type with new ones marked.
-- **System map**: sun, planets and any structure the pilot has docked in at their true bearing, distances compressed. Signatures sit on an outer ring because EVE gives no position for them. Hover or tab to anything for details.
+- **System map**: sun, planets and any structure the pilot has docked in at their true bearing, distances compressed. Signatures sit on an outer ring because EVE gives no position for them. Hover or tab to anything for details. Beside the map: what the system's effect does at that class, each static's lifetime, mass and the ship sizes that fit.
+- **Connections**: for each link in the chain, the wormhole type, whether it is fresh, end of life or mass-critical (set by hand), and a way to remove it.
+- **Kills by hour**: the newest player kills in the system by hour of day (EVE time), to show when the locals are active.
+- **Loot and gas to hand over**: the pilot's exploration loot and gas, wherever it sits (station hangars, a structure, a ship's cargo or gas hold), with volume. For each item: the lowest ask and top bid in every hub, the jumps from where the loot sits to each hub, the hub to **list in** and the hub to **sell now in**, and totals after fees. A table above compares taking the whole pile to one hub.
+  - *List in* is the highest ask among hubs where the pile would sell within `loot.days` at `loot.share` of that region's daily trade (14 days at 15% unless changed in the settings). A lone listing more than 1.5 times the Jita ask is passed over and counted at the Jita ask. If every hub is slower than that, the quickest one is named.
+  - *Sell now in* fills the bids standing at the hub station, in its system or region-wide, best price first, with every unit held, so a thin bid book shows as "bids take N of M".
+  - What counts: salvaged materials, ancient salvage, sleeper components, datacores, decryptors, relics and similar loot groups; harvested gas, raw or compressed. Blueprint copies are listed but cannot be sold on the market.
 
 Wormhole statics, effects and wormhole types in `js/whdata.js` are derived from data files in [Wanderer](https://github.com/wanderer-industries/wanderer) (MIT License, Copyright (c) 2024 Wanderer Industries).
+
+## Android app and widgets
+
+`android/` holds a small Android app (Android 12 or newer). It shows this same page full screen and adds three home-screen widgets:
+
+- **Trading**: overall wealth, how many orders to change, check or judge, which hubs they are at, wallet, ISK in buy orders and on sale, the week's net.
+- **Planetary Interaction**: what is waiting on the planets, whether a pickup is worth it, when extractors stop or have stopped.
+- **Wormholes**: where the wormhole pilot is, the system's class, effect and statics, kills there, and the loot to hand over.
+
+How it fits together:
+
+- The app loads the live page, so a change to the page reaches the app without a new APK. Only changes under `android/` need one.
+- **Sign-in** opens EVE's login in the phone's own browser. EVE sends the browser back to this page, which hands the one-time code to the app (`eveops://auth`). The app keeps the sign-in in its private storage, excluded from backups, and gives the page short-lived access tokens when it asks. The page inside the app never holds the refresh token.
+- **Widgets** show a summary that the page itself works out and hands to the app, so a widget can never disagree with the board. While the app is closed, the app loads the page off screen about every half hour (as often as Android allows a background app) and on a tap of a widget's refresh arrow. Each widget says when its figures are from.
+- A tap on a widget opens the matching view.
+
+Getting the APK: GitHub builds it (`.github/workflows/android.yml`). Every push under `android/` is compiled, unit-tested and run on an emulator against the sample data. A release with the APK attached is published by pushing a tag named `android-<n>`, or from the Actions tab: *Android app* → *Run workflow*.
+
+Signing: the workflow signs with the keystore in the repository secret `SIGNING_KEY` (a PKCS12 keystore, base64, alias and password `eveops`; the secret itself is what keeps it private). Without that secret it signs with a throwaway key: the APK installs, but Android will not install a later build over it.
 
 ## How fresh the numbers are
 
@@ -61,7 +86,7 @@ Your own orders are matched by ID inside the market book, so a price change show
 
 ## Settings
 
-`js/config.js` holds the fees (broker 1.5%, sales tax 3.375%, 0.39% per price change), the sniper and big-move thresholds, the slow-line threshold, and the item types left out of trading math.
+`js/config.js` holds the fees (broker 1.5%, sales tax 3.375%, 0.39% per price change), the sniper and big-move thresholds, the slow-line threshold, the loot hand-over pace (`loot.share`, `loot.days`), and the item types left out of trading math. The Android app repeats the Client ID and scopes in `android/.../Config.kt`: change both together.
 
 ## Deploying
 
@@ -74,7 +99,9 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
 - `js/esi.js` — sign-in and requests
 - `js/app.js` — loading, model, drawing
 - `js/demo.js` — sample data behind `#demo`
+- `js/wh.js`, `js/whdata.js` — the Wormholes tab and its table of statics, effects and wormhole types
 - `tests/logic.test.js` — run with `node --test tests/logic.test.js`
+- `android/` — the Android app: `Auth.kt` (sign-in), `Bridge.kt` (link to the page), `Refresh.kt` (background refresh), `Faces.kt` (what each widget says; unit-tested), `Widgets.kt`
 
 The page sets a content security policy that allows requests only to `esi.evetech.net`, `login.eveonline.com`, `zkillboard.com` and the page's own address, and scripts only from this repository.
 

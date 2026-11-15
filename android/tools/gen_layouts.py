@@ -30,7 +30,7 @@ HEAD = '''<?xml version="1.0" encoding="utf-8"?>
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="34dp"
+        android:layout_height="30dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -49,10 +49,10 @@ HEAD = '''<?xml version="1.0" encoding="utf-8"?>
         <ImageView
             android:id="@+id/refresh"
             android:layout_width="40dp"
-            android:layout_height="34dp"
+            android:layout_height="30dp"
             android:contentDescription="@string/refresh"
             android:paddingHorizontal="9dp"
-            android:paddingVertical="6dp"
+            android:paddingVertical="4dp"
             android:src="@drawable/ic_refresh" />
     </LinearLayout>
 

@@ -28,7 +28,7 @@
     </style>
     <style name="W.Big">
         <item name="android:fontFamily">sans-serif-condensed-medium</item>
-        <item name="android:textSize">28sp</item>
+        <item name="android:textSize">26sp</item>
         <item name="android:includeFontPadding">false</item>
     </style>
     <style name="W.Line">

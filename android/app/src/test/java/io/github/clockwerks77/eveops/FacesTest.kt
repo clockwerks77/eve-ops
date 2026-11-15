@@ -114,6 +114,18 @@ class FacesTest {
     }
 
     @Test
+    fun linesThatFit() {
+        assertEquals(5, Fit.linesFor(190f, 1f))
+        assertEquals(6, Fit.linesFor(210f, 1f))
+        assertEquals(2, Fit.linesFor(120f, 1f))
+        assertEquals(1, Fit.linesFor(110f, 1f))
+        assertEquals(1, Fit.linesFor(60f, 1f))            // never fewer than the headline call
+        assertEquals(6, Fit.linesFor(400f, 1f))
+        assertTrue(Fit.linesFor(190f, 1.3f) < Fit.linesFor(190f, 1f))     // larger text, fewer lines
+        for (n in 1 until Fit.MAX_LINES) assertTrue(Fit.needed(n, 1f) < Fit.needed(n + 1, 1f))
+    }
+
+    @Test
     fun numbersAndTimes() {
         assertEquals("14.83B", words.isk(14_830_000_000.0))
         assertEquals("589.1M", words.isk(589_100_000.0))

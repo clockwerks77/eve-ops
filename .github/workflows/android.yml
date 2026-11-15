@@ -1,9 +1,15 @@
 name: Android app
 
-# Every push that touches the app is compiled and tested.
-# Pushing a tag named android-<n> also publishes the APK as a release.
+# Every push that touches the app is compiled, tested and run on an emulator.
+# The APK is published as a release by pushing a tag named android-<n>,
+# or from the Actions tab: Android app -> Run workflow.
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the APK as a release
+        type: boolean
+        default: true
   push:
     branches: [main]
     tags: ['android-*']
@@ -83,11 +89,12 @@ jobs:
           echo "::notice title=apk::build 1.0.$EVEOPS_BUILD, $size, $EVEOPS_SIGNING key, certificate $cert"
 
       - name: Publish the APK
-        if: startsWith(github.ref, 'refs/tags/android-')
+        if: startsWith(github.ref, 'refs/tags/android-') || (github.event_name == 'workflow_dispatch' && inputs.publish)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="1.0.$EVEOPS_BUILD"
+          case "$GITHUB_REF" in refs/tags/*) tag="$GITHUB_REF_NAME" ;; *) tag="android-$EVEOPS_BUILD" ;; esac
           apk="eve-ops-$v.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "$apk"
           {
@@ -101,7 +108,7 @@ jobs:
               echo "Signed with a temporary key, because no SIGNING_KEY secret is set on the repository yet. It works, but a later build will not install over it: Android will ask for this one to be uninstalled first."
             fi
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" "$apk" --title "Eve Ops for Android $v" --notes-file notes.md
+          gh release create "$tag" "$apk" --title "Eve Ops for Android $v" --notes-file notes.md --target "$GITHUB_SHA"
           echo "::notice title=published::$apk"
 
   # Runs the app on an emulator against the page's sample data and keeps screenshots of the app and its widgets.

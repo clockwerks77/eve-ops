@@ -84,6 +84,20 @@ class Wording(
     fun within(ms: Long, window: Long): Boolean = ms - now < window
 }
 
+/**
+ * How much of a widget fits at a given height. Heights are in dp; text grows with the user's font size.
+ * Measured on a Pixel 6 emulator: 4dp top padding, a 30dp title row, the large figure, then lines of 14sp text
+ * 3dp apart, and 10dp at the bottom.
+ */
+object Fit {
+    const val MAX_LINES = 6
+
+    fun needed(lines: Int, fontScale: Float): Float = 44f + 30.5f * fontScale + lines * (19.4f * fontScale + 3f)
+
+    fun linesFor(heightDp: Float, fontScale: Float): Int =
+        (1..MAX_LINES).lastOrNull { needed(it, fontScale) <= heightDp } ?: 1
+}
+
 object Faces {
     private val ROMAN = listOf("", "I", "II", "III", "IV", "V")
     private const val HOUR = 3_600_000L

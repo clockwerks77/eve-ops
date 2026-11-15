@@ -12,6 +12,7 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.format.DateFormat
 import android.text.style.ForegroundColorSpan
+import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import java.time.ZoneId
@@ -71,15 +72,29 @@ object Widgets {
         return out
     }
 
+    /**
+     * A widget's views for every height: one version per number of lines, each tagged with the height it needs.
+     * The launcher shows the fullest one that fits, so a line is either whole or absent, never cut in half.
+     */
     fun views(ctx: Context, kind: Kind): RemoteViews {
         val face = face(ctx, kind)
+        val scale = ctx.resources.configuration.fontScale
+        val bySize = LinkedHashMap<SizeF, RemoteViews>()
+        for (n in 1..Fit.MAX_LINES) bySize[SizeF(120f, Fit.needed(n, scale))] = build(ctx, kind, face, n)
+        return RemoteViews(bySize)
+    }
+
+    /** The version of a widget with exactly this many lines. */
+    fun single(ctx: Context, kind: Kind, lines: Int): RemoteViews = build(ctx, kind, face(ctx, kind), lines)
+
+    private fun build(ctx: Context, kind: Kind, face: Face, lines: Int): RemoteViews {
         val v = RemoteViews(ctx.packageName, kind.layout)
         v.setTextViewText(R.id.title, face.title)
         v.setTextViewText(R.id.as_of, if (Snapshots.refreshing(ctx)) "refreshing" else face.asOf)
         v.setTextViewText(R.id.big, face.big)
         v.setTextViewText(R.id.big_note, face.bigNote)
         for (i in LINES.indices) {
-            val line = face.lines.getOrNull(i)
+            val line = if (i < lines) face.lines.getOrNull(i) else null
             if (line == null) {
                 v.setViewVisibility(LINES[i], View.GONE)
             } else {

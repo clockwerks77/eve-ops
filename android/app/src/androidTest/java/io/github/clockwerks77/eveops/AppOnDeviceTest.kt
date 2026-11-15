@@ -68,14 +68,12 @@ class AppOnDeviceTest {
         assertEquals("J111613", snap.getJSONObject("wh").getString("system"))
         assertTrue(snap.getJSONObject("scout").getJSONObject("loot").getDouble("list") > 0)
 
-        start(Intent(ctx, PreviewActivity::class.java).putExtra("height", 190))
-        assertTrue("widgets drawn", device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 15_000))
-        Thread.sleep(800)
-        shot("widgets-tall")
-        start(Intent(ctx, PreviewActivity::class.java).putExtra("height", 120))
-        device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 15_000)
-        Thread.sleep(800)
-        shot("widgets-short")
+        for (height in listOf(210, 165, 120)) {
+            start(Intent(ctx, PreviewActivity::class.java).putExtra("height", height))
+            assertTrue("widgets drawn at $height dp", device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 15_000))
+            Thread.sleep(1200)
+            shot("widgets-$height")
+        }
     }
 
     @Test
