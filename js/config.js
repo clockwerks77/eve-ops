@@ -56,6 +56,9 @@ window.EVEOPS_CONFIG = {
   // A price change bigger than this share of your price is flagged "Big move" for you to judge
   // (dump or repricing?) instead of being listed as a routine change.
   bigMove: 0.02,
+  // "Copied" marks on the price buttons: after `grace` seconds of newer market data with the old price still showing,
+  // a copied price is reported as not in the book; marks are dropped after `keepHours`.
+  copied: { grace: 180, keepHours: 6 },
   // A line with no sale for this many days is listed under "Slow lines".
   staleDays: 14,
 

@@ -323,3 +323,21 @@ test('units traded a day counts calendar days, not days that had trades', () => 
   assert.equal(L.tradedPerDay([], now, 7), 0);
   assert.equal(L.tradedPerDay(null, now, 7), 0);
 });
+
+test('copied marks: waiting, landed, not in the book, and a book that moved', () => {
+  const at = Date.parse('2026-11-15T17:14:00Z'), grace = 180000, mark = { price: 1322000, at };
+  assert.equal(L.copyState(undefined, { live: 1323000, target: 1322000, dataAt: at, grace }), null);
+  // just copied: the page's data is older than the copy
+  assert.deepEqual(L.copyState(mark, { live: 1323000, target: 1322000, dataAt: at - 60000, grace }), { state: 'waiting', price: 1322000, at, moved: false });
+  // data from inside the time it takes to type the price does not count against it
+  assert.equal(L.copyState(mark, { live: 1323000, target: 1322000, dataAt: at + grace - 1, grace }).state, 'waiting');
+  // newer data, old price still showing: it was never typed
+  assert.equal(L.copyState(mark, { live: 1323000, target: 1322000, dataAt: at + grace, grace }).state, 'missed');
+  // the order shows the copied price: done, whatever the book asks for next
+  assert.deepEqual(L.copyState(mark, { live: 1322000, target: 1321000, dataAt: at + 400000, grace }), { state: 'landed', price: 1322000, at, moved: false });
+  assert.equal(L.copyState(mark, { live: 1322000, target: null, dataAt: at + 400000, grace }).state, 'landed');
+  // a rival moved before the change showed: the price to type is a different one now
+  assert.equal(L.copyState(mark, { live: 1323000, target: 1321000, dataAt: at + 30000, grace }).moved, true);
+  // nothing to type any more (rival gone) is not a moved book
+  assert.equal(L.copyState(mark, { live: 1323000, target: null, dataAt: at + 30000, grace }).moved, false);
+});

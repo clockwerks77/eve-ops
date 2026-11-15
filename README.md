@@ -32,6 +32,7 @@ Note that every site under `clockwerks77.github.io` shares the same browser stor
 - **Haul manifest** (Jita tab): what is waiting in the Jita hangar, its volume against the cargo figure you enter, the lowest ask in each hub, and where to take each item (a hub where you sold it this week first, then the highest ask).
 - **Restock shortlist** (Jita tab): lines with four days of stock or less, or sold out this week, with units to bid, the bid to type and the net at the hub price.
 - **Pins**: "Pin prices" freezes the prices for a stop while you work through it. Each row then waits until the market book shows that exact price.
+- **Copied marks**: pressing a price copies it and marks the row: the button goes quiet with a tick and the time, and the stop shows "3 of 7 copied", so the amber prices left are the ones still to do. The mark becomes "Changed" when the market book shows the order at that price, warns if newer data still shows the old price ("not in the book"), and says so if the price to type has changed since. Undo on a row, or "Clear copied marks" for the stop. Bids on the restock shortlist are marked the same way. Kept on each device for 6 hours (`copied` in `js/config.js`).
 
 ## Wormholes tab
 
@@ -107,6 +108,7 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
 - `android/` — the Android app: `Auth.kt` (sign-in), `Bridge.kt` (link to the page), `Refresh.kt` (background refresh), `Faces.kt` (what each widget says and how its text fits; unit-tested), `Widgets.kt`
 - `tools/` — checks to run before a push:
   - `node tools/render.js <folder>` draws the sample data at monitor, tablet and phone size and reports page errors or sideways overflow
+  - `node tools/copy-test.js` presses price buttons on the sample data and checks the copied marks (clipboard, progress, Undo, clear)
   - `node tools/app-link-test.js` checks the page's side of the Android app link with a stand-in for the app (give it a file name to rewrite the Android test fixture `android/app/src/test/resources/snapshot-demo.json`)
   - `tools/ci.sh [commit]` waits for GitHub's Android build and emulator run and prints what they reported
   - `tools/screens.sh <folder>` fetches the emulator screenshots

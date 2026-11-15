@@ -309,6 +309,19 @@
     return 'unclear';
   }
 
+  /**
+   * What a "copied" mark on an order means now. The mark { price, at } is made when its price button is pressed.
+   *   landed:  the order shows at the copied price, so the change went in
+   *   waiting: the page's data on the order is not yet newer than the copy, allowing `grace` ms to type it in game
+   *   missed:  the data is newer than that and the order still shows another price
+   * `moved` is true when the price to type now is no longer the one that was copied.
+   */
+  function copyState(mark, o) {
+    if (!mark) return null;
+    const state = o.live === mark.price ? 'landed' : o.dataAt >= mark.at + o.grace ? 'missed' : 'waiting';
+    return { state, price: mark.price, at: mark.at, moved: state !== 'landed' && o.target != null && o.target !== mark.price };
+  }
+
   /** Rows copied from the in-game probe scanner (Ctrl+A, Ctrl+C): one signature or anomaly per line, tab separated. */
   function parseSigs(text) {
     const out = [];
@@ -492,7 +505,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
+    orderChecks, weekOf, moveRead, copyState, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

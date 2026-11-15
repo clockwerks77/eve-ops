@@ -165,6 +165,20 @@ button { font: inherit; color: inherit; }
 }
 .none { color: var(--lead); font-weight: 500; }
 
+/* a copied price: the button goes quiet and ticked, so the amber ones left are the ones still to do */
+.price.is-done { color: var(--dim); border-color: var(--seam); font-weight: 500; }
+.price.is-done:hover { background: color-mix(in srgb, var(--dim) 12%, transparent); }
+.price.is-done::before {
+  content: ""; display: inline-block; width: 0.28em; height: 0.56em; margin: 0 0.5em 0.06em 0.1em;
+  border: solid var(--lead); border-width: 0 0.13em 0.13em 0; transform: rotate(45deg);
+}
+/* width 0 + min-width 100%: the note wraps to the button's width and never widens its column */
+.mark { display: block; width: 0; min-width: 100%; margin-top: 0.2rem; color: var(--dim); font-size: 0.86em; line-height: 1.25; white-space: normal; }
+.mark.is-last { color: var(--ink); font-weight: 500; }
+.mark.is-missed { color: var(--warn); }
+.unmark { background: none; border: 0; padding: 0 0 0 0.3rem; color: var(--calm); text-decoration: underline; text-underline-offset: 0.15em; cursor: pointer; font-weight: 400; }
+.row.is-copied .name, tr.is-copied .pi-item { color: var(--dim); font-weight: 400; }
+
 /* rows that need nothing recede, so the ones to change stand out */
 .row.is-hold .yours, .row.is-hold .front, .row.is-hold .left, .row.is-hold .net, .row.is-hold .pace,
 .row.is-none .c, .row.is-wait .c { color: var(--dim); }
