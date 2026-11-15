@@ -1,0 +1,220 @@
+/* Eve Ops — a board read at a glance from a side monitor, a tablet or a phone.
+   One loud thing: the price to type (amber). Everything else stays quiet. */
+
+@font-face { font-family: "Barlow SC"; font-weight: 400; font-display: swap; src: url("../fonts/barlow-semi-condensed-400.woff2") format("woff2"); }
+@font-face { font-family: "Barlow SC"; font-weight: 500; font-display: swap; src: url("../fonts/barlow-semi-condensed-500.woff2") format("woff2"); }
+@font-face { font-family: "Barlow SC"; font-weight: 600; font-display: swap; src: url("../fonts/barlow-semi-condensed-600.woff2") format("woff2"); }
+@font-face { font-family: "Barlow SC"; font-weight: 700; font-display: swap; src: url("../fonts/barlow-semi-condensed-700.woff2") format("woff2"); }
+
+:root {
+  --void: #0b171d;   /* page: deep petrol, dark enough to sit beside the game */
+  --hull: #10222b;   /* the stop you are docked in */
+  --seam: #24414d;   /* hairlines */
+  --ink: #dce7e9;    /* text */
+  --dim: #88a2ab;    /* secondary text */
+  --isk: #f2b94b;    /* the price to type, and nothing else */
+  --lead: #62d2aa;
+  --warn: #f3945c;
+  --bad: #f06a6a;
+  --calm: #7fb2c9;
+  --gap: 1.1rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { font-size: clamp(15px, 0.5vw + 9.5px, 19px); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--void); color: var(--ink);
+  font: 400 1rem/1.35 "Barlow SC", "Segoe UI", Roboto, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+h1, h2, h3, p, dl, dd, ul { margin: 0; padding: 0; }
+ul { list-style: none; }
+a { color: var(--calm); text-underline-offset: 0.15em; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--isk); outline-offset: 2px; }
+.sub { display: block; color: var(--dim); font-size: 0.84rem; font-weight: 400; }
+
+.btn {
+  background: none; border: 1px solid var(--seam); border-radius: 3px; color: var(--ink);
+  padding: 0.3rem 0.8rem; font-weight: 500; cursor: pointer; text-decoration: none; display: inline-block;
+}
+.btn:hover { border-color: var(--dim); }
+.btn:disabled { color: var(--dim); cursor: default; }
+.btn-quiet { color: var(--dim); }
+.btn[aria-pressed="true"] { color: var(--lead); border-color: var(--lead); }
+.btn-big { font-size: 1.25rem; font-weight: 600; padding: 0.6rem 1.4rem; border-color: var(--isk); color: var(--isk); }
+.btn-big:hover { background: var(--isk); color: var(--void); border-color: var(--isk); }
+
+.banner { background: var(--seam); padding: 0.35rem var(--gap); font-size: 0.9rem; }
+
+/* ------------------------------------------------------------ top bar */
+.top {
+  position: sticky; top: 0; z-index: 5; background: var(--void);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.4rem 2.2rem; align-items: center;
+  padding: 0.65rem var(--gap); border-bottom: 1px solid var(--seam);
+}
+.who h1 { font-size: 1.3rem; font-weight: 600; line-height: 1.15; }
+.who p { color: var(--dim); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.purse { display: flex; gap: 1.8rem; }
+.purse dt { color: var(--dim); font-size: 0.8rem; }
+.purse dd { font-size: 1.3rem; font-weight: 600; line-height: 1.1; }
+.sync { display: flex; align-items: center; gap: 0.9rem; text-align: right; font-size: 0.9rem; }
+
+/* -------------------------------------------------------------- board */
+.board { display: grid; grid-template-columns: minmax(0, 1fr); }
+.stops { container-type: inline-size; min-width: 0; }
+.side { border-top: 1px solid var(--seam); }
+.empty { padding: 2.5rem var(--gap); color: var(--dim); font-size: 1.1rem; }
+@media (min-width: 70rem) {
+  .board { grid-template-columns: minmax(0, 1fr) clamp(19rem, 25vw, 26rem); align-items: start; }
+  .side { border-top: 0; border-left: 1px solid var(--seam); min-height: 100%; }
+}
+
+/* --------------------------------------------------------------- stop */
+.stop { padding: 0.9rem var(--gap) 1.1rem; border-bottom: 1px solid var(--seam); border-left: 3px solid transparent; }
+.stop.is-here { background: var(--hull); border-left-color: var(--ink); }
+.stop-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 1rem; }
+.stop h2 { font-size: 2.1rem; font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
+.stop-state { color: var(--dim); font-weight: 500; }
+.stop.is-here .stop-state { color: var(--ink); }
+.stop-sum { margin-left: auto; font-weight: 500; }
+.stop-sub { color: var(--dim); font-size: 0.86rem; margin-top: 0.15rem; }
+.stop-tools { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+.stop-tools:empty { display: none; }
+
+/* The route: one square per system, coloured by security as the game colours it.
+   A red cap marks a system where ships or pods died in the last hour. */
+.routes { display: grid; gap: 0.5rem; margin-top: 0.65rem; }
+.route { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 0.1rem 0.8rem; align-items: center; font-size: 0.86rem; }
+.route-label { color: var(--dim); }
+.strip { display: flex; gap: 2px; padding-top: 5px; min-width: 0; }
+.sys { flex: 0 1 0.8rem; min-width: 3px; height: 0.8rem; border-radius: 1px; background: var(--dim); }
+.sys.is-hot { box-shadow: 0 -5px 0 0 var(--bad); }
+.hot { grid-column: 2; color: var(--dim); }
+.s10 { background: #2c75e2; } .s9 { background: #399aeb; } .s8 { background: #4ecef8; } .s7 { background: #60dba3; }
+.s6 { background: #71e754; } .s5 { background: #f5ff83; } .s4 { background: #dc6d07; } .s3 { background: #ce440f; }
+.s2 { background: #bc1117; } .s1 { background: #732121; } .s0 { background: #8d3264; }
+
+/* --------------------------------------------------------------- rows */
+.rows { margin-top: 0.9rem; }
+.row {
+  display: grid; align-items: start; gap: 0.25rem 0.9rem; padding: 0.55rem 0; border-top: 1px solid var(--seam);
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "item item item type" "left yours front type" "call call call call" "net pace pace pace";
+}
+.row-head { display: none; }
+.c { min-width: 0; }
+.c::before { content: attr(data-label); display: block; color: var(--dim); font-size: 0.76rem; }
+.item { grid-area: item; display: flex; align-items: center; gap: 0.55rem; }
+.item::before, .call::before, .type::before { content: none; }
+.left { grid-area: left; } .yours { grid-area: yours; } .front { grid-area: front; }
+.call { grid-area: call; } .type { grid-area: type; align-self: center; } .net { grid-area: net; } .pace { grid-area: pace; }
+.net .sub, .pace .sub { display: inline; margin-left: 0.4rem; }
+
+.icon { width: 2rem; height: 2rem; flex: none; border-radius: 2px; background: var(--seam); }
+.icon.is-missing { visibility: hidden; }
+.name { font-size: 1.12rem; font-weight: 500; line-height: 1.2; }
+.twin { display: inline-block; margin-left: 0.6rem; color: var(--void); background: var(--ink); font-size: 0.78rem; font-weight: 600; padding: 0 0.4rem; border-radius: 2px; vertical-align: 0.1em; }
+.left b { font-weight: 600; }
+.of { color: var(--dim); }
+.level { display: block; white-space: nowrap; }
+.neg { color: var(--bad); }
+
+.chip { display: inline-block; font-weight: 600; margin-right: 0.7rem; white-space: nowrap; }
+.chip::before { content: ""; display: inline-block; width: 0.55rem; height: 0.55rem; margin-right: 0.4rem; background: currentColor; }
+.chip-go { color: var(--warn); }
+.chip-opt { color: var(--dim); }
+.chip-hold { color: var(--calm); }
+.chip-lead, .chip-done { color: var(--lead); }
+.chip-pin { color: var(--isk); }
+.chip-gone, .chip-wait { color: var(--dim); }
+.chip-lead::before, .chip-done::before { border-radius: 50%; }
+.why { color: var(--dim); font-size: 0.9rem; }
+
+.price {
+  position: relative; background: none; border: 1px solid color-mix(in srgb, var(--isk) 45%, transparent); border-radius: 3px;
+  color: var(--isk); font-size: 1.5rem; font-weight: 600; line-height: 1; padding: 0.4rem 0.6rem; cursor: copy; white-space: nowrap;
+}
+.price:hover { background: color-mix(in srgb, var(--isk) 12%, transparent); }
+.price.is-soft { color: color-mix(in srgb, var(--isk) 60%, var(--dim)); border-style: dashed; font-weight: 500; }
+.price.is-copied::after {
+  content: "Copied"; position: absolute; inset: 0; display: grid; place-items: center;
+  background: var(--isk); color: var(--void); font-size: 1rem; border-radius: 2px;
+}
+.none { color: var(--lead); font-weight: 500; }
+
+/* rows that need nothing recede, so the ones to change stand out */
+.row.is-hold .yours, .row.is-hold .front, .row.is-hold .left, .row.is-hold .net, .row.is-hold .pace,
+.row.is-none .c, .row.is-wait .c { color: var(--dim); }
+.row.is-hold .name { font-weight: 400; }
+
+.hangar { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--seam); font-size: 0.95rem; }
+.hangar-label { color: var(--dim); margin-right: 0.8rem; }
+.hangar-item { display: inline-block; margin-right: 1.2rem; }
+
+/* wide: the rows become a table, labels move to one header line */
+@container (min-width: 49rem) {
+  .row {
+    align-items: center; gap: 0 0.8rem; padding: 0.4rem 0;
+    grid-template-areas: none;
+    grid-template-columns: minmax(10rem, 2.2fr) 4.8rem 5.8rem minmax(7.5rem, 1.2fr) minmax(8rem, 1.6fr) 8.6rem;
+  }
+  .row > .c { grid-area: auto; }
+  .row > .net, .row > .pace { display: none; }
+  .c::before { content: none; }
+  .row-head { display: grid; border-top: 0; padding: 0 0 0.25rem; color: var(--dim); font-size: 0.82rem; }
+  .row-head .item { font-size: 1rem; font-weight: 600; color: var(--ink); }
+  .left, .yours, .net, .pace { text-align: right; }
+  .type { text-align: right; justify-self: end; }
+  .net .sub, .pace .sub { display: block; margin-left: 0; }
+  .call { display: flex; flex-wrap: wrap; align-items: baseline; }
+}
+@container (min-width: 61rem) {
+  .row { gap: 0 1rem; grid-template-columns: minmax(10rem, 2.2fr) 4.8rem 5.8rem minmax(7.5rem, 1.2fr) minmax(8rem, 1.6fr) 8.6rem 4.2rem 5.6rem; }
+  .row > .net, .row > .pace { display: block; }
+}
+
+/* --------------------------------------------------------------- side */
+.panel { padding: 0.9rem var(--gap) 1.1rem; border-bottom: 1px solid var(--seam); }
+.panel h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
+.facts { display: grid; gap: 0.3rem; }
+.fact { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: baseline; }
+.fact dt { color: var(--dim); }
+.fact dd { font-weight: 500; text-align: right; }
+.note { color: var(--dim); font-size: 0.86rem; margin-top: 0.6rem; }
+
+.bars { display: flex; gap: 3px; height: 5rem; margin-top: 0.9rem; }
+.bar { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.col { flex: 1; display: flex; align-items: flex-end; }
+.bar i { display: block; width: 100%; background: var(--calm); border-radius: 1px 1px 0 0; }
+.bar.is-today i { background: var(--ink); }
+.bar b { font-weight: 400; font-size: 0.72rem; color: var(--dim); text-align: center; padding-top: 0.15rem; }
+
+.timers li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; padding: 0.35rem 0; border-top: 1px solid var(--seam); }
+.timers li:first-child { border-top: 0; padding-top: 0; }
+.t-when { text-align: right; font-weight: 500; }
+.timers .is-soon .t-when { color: var(--warn); }
+
+.feeds li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; font-size: 0.9rem; padding: 0.1rem 0; }
+.feeds .sub { text-align: right; }
+.feeds .is-err, .feeds .is-err .sub { color: var(--bad); }
+.tools { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
+
+/* --------------------------------------------------------------- door */
+.door { max-width: 36rem; padding: 14vh var(--gap) 3rem; margin-left: max(0px, 8vw - var(--gap)); }
+.door h1 { font-size: 3.4rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.lede { font-size: 1.3rem; margin: 0.8rem 0 1.6rem; max-width: 30rem; }
+.door-note { border-left: 3px solid var(--warn); padding-left: 0.8rem; margin-bottom: 1.4rem; }
+.small { color: var(--dim); margin-top: 1.1rem; max-width: 30rem; }
+
+/* -------------------------------------------------------------- phone */
+@media (max-width: 46rem) {
+  :root { --gap: 0.85rem; }
+  .top { grid-template-columns: minmax(0, 1fr) auto; }
+  .purse { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; gap: 1rem; }
+  .sync p { display: none; }
+  .stop h2 { font-size: 1.8rem; }
+  .route { grid-template-columns: minmax(0, 1fr); }
+  .hot { grid-column: 1; }
+  .price { font-size: 1.35rem; }
+}

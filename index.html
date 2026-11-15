@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The page may only talk to EVE's API and EVE's login, and only run its own scripts. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://images.evetech.net; connect-src https://esi.evetech.net https://login.eveonline.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0b171d">
+<meta name="color-scheme" content="dark">
+<title>Eve Ops</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app"><noscript>Eve Ops needs JavaScript to read your orders from EVE.</noscript></div>
+<script src="js/config.js"></script>
+<script src="js/logic.js"></script>
+<script src="js/esi.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
