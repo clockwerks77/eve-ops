@@ -13,8 +13,9 @@
     android:paddingBottom="10dp">
 
     <LinearLayout
+        android:id="@+id/head"
         android:layout_width="match_parent"
-        android:layout_height="30dp"
+        android:layout_height="32dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -33,10 +34,10 @@
         <ImageView
             android:id="@+id/refresh"
             android:layout_width="40dp"
-            android:layout_height="30dp"
+            android:layout_height="match_parent"
             android:contentDescription="@string/refresh"
             android:paddingHorizontal="9dp"
-            android:paddingVertical="4dp"
+            android:paddingVertical="5dp"
             android:src="@drawable/ic_refresh" />
     </LinearLayout>
 
@@ -68,25 +69,26 @@
         android:id="@+id/line2"
         style="@style/W.Line"
         android:paddingEnd="10dp"
-        android:text="No effect · C247 to C3, 16 h · H900 to C5, 24 h" />
+        android:text="No effect · C247 to C3 · H900 to C5" />
 
     <TextView
         android:id="@+id/line3"
         style="@style/W.Line"
         android:paddingEnd="10dp"
-        android:text="No kills in 24 h · 3 this week · 9 signatures" />
+        android:text="No kills in 24 h · 3 in 7 days · 9 signatures" />
 
     <TextView
         android:id="@+id/line4"
         style="@style/W.Line"
         android:paddingEnd="10dp"
-        android:text="Loot: list 102.6M or sell now 91.0M · 31 m³" />
+        android:text="Loot: list 102.6M · sell now 91.0M" />
 
     <TextView
         android:id="@+id/line5"
         style="@style/W.Line"
         android:paddingEnd="10dp"
-        android:text="Best single hub to list: Rens · in 4 places" />
+        android:text=""
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/line6"

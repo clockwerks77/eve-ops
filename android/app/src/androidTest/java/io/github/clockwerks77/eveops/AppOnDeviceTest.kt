@@ -68,12 +68,19 @@ class AppOnDeviceTest {
         assertEquals("J111613", snap.getJSONObject("wh").getString("system"))
         assertTrue(snap.getJSONObject("scout").getJSONObject("loot").getDouble("list") > 0)
 
-        for (height in listOf(210, 165, 120)) {
-            start(Intent(ctx, PreviewActivity::class.java).putExtra("height", height))
-            assertTrue("widgets drawn at $height dp", device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 15_000))
+        // a phone's 4-by-2 space, the smallest space, a tall one, and a wide one as on a tablet or an unfolded phone
+        for ((name, width, height) in listOf(Triple("phone", 0, 200), Triple("small", 0, 120), Triple("tall", 0, 300), Triple("narrow", 300, 190))) {
+            start(Intent(ctx, PreviewActivity::class.java).putExtra("width", width).putExtra("height", height))
+            assertTrue("widgets drawn, $name", device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 15_000))
             Thread.sleep(1200)
-            shot("widgets-$height")
+            shot("widgets-$name")
         }
+        start(Intent(ctx, PreviewActivity::class.java).putExtra("width", 640).putExtra("height", 290).putExtra("landscape", true))
+        assertTrue("widgets drawn, wide", device.wait(Until.hasObject(By.text("Sample Trader (sample data)")), 20_000))
+        Thread.sleep(2500)
+        shot("widgets-wide")
+        device.pressHome()
+        Thread.sleep(1500)
     }
 
     @Test

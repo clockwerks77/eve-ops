@@ -85,17 +85,60 @@ class Wording(
 }
 
 /**
- * How much of a widget fits at a given height. Heights are in dp; text grows with the user's font size.
- * Measured on a Pixel 6 emulator: 4dp top padding, a 30dp title row, the large figure, then lines of 14sp text
- * 3dp apart, and 10dp at the bottom.
+ * How a widget's text fits its size: how many lines to show, how large to draw them, and how far apart.
+ * Sizes are in dp. Text grows with the widget until its lines would no longer fit the width, and is never
+ * smaller than the phone's own font size setting asks for when there is room.
+ *
+ * The figures were measured on an emulator: a line of text is 1.386 times its size tall (font padding
+ * included), the large figure 1.173 times; a character of the condensed face is about 0.42 of the size wide.
  */
 object Fit {
     const val MAX_LINES = 6
+    const val MIN_SCALE = 0.8f
+    const val MAX_SCALE = 2.5f
 
-    fun needed(lines: Int, fontScale: Float): Float = 44f + 30.5f * fontScale + lines * (19.4f * fontScale + 3f)
+    // text sizes and the title row's height at scale 1
+    const val TITLE = 15f
+    const val SMALL = 12.5f
+    const val BIG = 30f
+    const val LINE = 16f
+    const val HEAD = 32f
+    const val GAP = 3f
 
-    fun linesFor(heightDp: Float, fontScale: Float): Int =
-        (1..MAX_LINES).lastOrNull { needed(it, fontScale) <= heightDp } ?: 1
+    private const val PAD_TOP = 4f
+    private const val PAD_BOTTOM = 10f
+    private const val SIDE = 28f              // padding left and right of a line
+    private const val CHARS = 44f             // a line this long should fit the width
+    private const val CHAR_WIDE = 0.42f
+    private const val LINE_TALL = 1.386f
+    private const val BIG_TALL = 1.173f
+    private const val MAX_EXTRA_GAP = 9f
+
+    data class Plan(val lines: Int, val scale: Float, val gap: Float)
+
+    /** The height a widget needs for this many lines at this scale. */
+    fun needed(lines: Int, scale: Float): Float =
+        PAD_TOP + PAD_BOTTOM + (HEAD + BIG * BIG_TALL) * scale + lines * (LINE * LINE_TALL * scale + GAP)
+
+    /** The scale at which this many lines exactly fill the height. */
+    fun tallest(lines: Int, height: Float): Float =
+        (height - PAD_TOP - PAD_BOTTOM - lines * GAP) / (HEAD + BIG * BIG_TALL + lines * LINE * LINE_TALL)
+
+    /** The largest scale at which an ordinary line still fits the width. */
+    fun widest(width: Float): Float = (width - SIDE) / (CHARS * CHAR_WIDE * LINE)
+
+    fun plan(width: Float, height: Float, available: Int, fontScale: Float): Plan {
+        val most = available.coerceIn(1, MAX_LINES)
+        val cap = minOf(widest(width), MAX_SCALE)
+        val want = minOf(fontScale, cap).coerceAtLeast(MIN_SCALE)
+        // as many lines as fit at the size the text should at least be; a small widget keeps two lines a little smaller
+        var lines = (1..most).lastOrNull { tallest(it, height) >= want } ?: 1
+        if (lines < 2 && most >= 2 && tallest(2, height) >= 0.875f * minOf(1f, cap)) lines = 2
+        // then let the text grow into whatever height is left, and spread the lines over the rest
+        val scale = minOf(tallest(lines, height), cap).coerceIn(MIN_SCALE, MAX_SCALE)
+        val spare = (height - needed(lines, scale)) / lines
+        return Plan(lines, scale, GAP + spare.coerceIn(0f, MAX_EXTRA_GAP))
+    }
 }
 
 object Faces {
@@ -155,7 +198,7 @@ object Faces {
             dots(
                 listOf(
                     s.num("wallet")?.let { "Wallet " + w.isk(it) } ?: "",
-                    s.num("escrow")?.let { "buy orders " + w.isk(it) } ?: "",
+                    s.num("escrow")?.let { "bids " + w.isk(it) } ?: "",
                     s.num("listed")?.let { "on sale " + w.isk(it) } ?: "",
                 ),
             ),
@@ -170,7 +213,7 @@ object Faces {
             Tone.DIM,
         )
         val slots = if (o.isNull("max")) "" else o.whole("used").toString() + " of " + o.whole("max") + " slots"
-        lines += line(dots(listOf(plural(sells, "sell order"), plural(bids, "buy order"), slots)), Tone.DIM)
+        lines += line(dots(listOf(plural(sells, "sell"), plural(bids, "bid"), slots)), Tone.DIM)
         val problems = s.whole("problems")
         if (problems > 0) lines += line(plural(problems, "data feed") + " did not load", Tone.BAD)
         else if (where.isNotEmpty()) lines += line(where, Tone.DIM)
@@ -201,7 +244,7 @@ object Faces {
                 "full" -> line("Pick up now: storage is nearly full", Tone.WARN)
                 "worth" -> line("Worth a stop now", Tone.LEAD)
                 else -> listOf(
-                    Seg("Not worth a stop yet", Tone.INK),
+                    Seg("Not yet", Tone.INK),
                     Seg(
                         when {
                             reach == 1L -> " · reaches " + w.isk(worth) + " tomorrow"
@@ -271,18 +314,18 @@ object Faces {
         val lines = mutableListOf<List<Seg>>()
 
         if (wh != null) {
-            val place = wh.text("place")
-            val ship = wh.text("ship")
-            val shipName = wh.text("shipName")
+            // the system is already the large figure, so a structure named "J142117 - THWR HQ" is shown as "THWR HQ"
+            val place = wh.text("place").removePrefix(wh.text("system") + " - ")
             lines += line(
                 dots(
                     listOf(
                         if (wh.optBoolean("docked")) "Docked" + (if (place.isEmpty()) "" else " at $place") else "In space",
-                        if (ship.isEmpty()) "" else ship + if (shipName.isEmpty()) "" else " “$shipName”",
+                        wh.text("ship"),
                     ),
                 ),
             )
-            val statics = (wh.arr("statics")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList())
+            // "C247 to C3, 16 h" on the page; the widget leaves the lifetime out
+            val statics = (wh.arr("statics")?.let { a -> (0 until a.length()).map { a.optString(it).substringBefore(",") } } ?: emptyList())
             lines += line(dots(listOf(wh.text("effect").ifEmpty { "No effect" }) + statics))
             val sigs = wh.whole("sigs")
             val sigText = if (sigs > 0) " · " + plural(sigs, "signature") else ""
@@ -290,10 +333,10 @@ object Faces {
             lines += when {
                 kills == null -> line("Kills not loaded yet$sigText", Tone.DIM)
                 kills.whole("day") > 0 -> listOf(
-                    Seg(plural(kills.whole("day"), "kill") + " here in 24 h", Tone.BAD),
-                    Seg(" · " + kills.whole("week") + " this week" + sigText, Tone.DIM),
+                    Seg(plural(kills.whole("day"), "kill") + " in 24 h", Tone.BAD),
+                    Seg(" · " + kills.whole("week") + " in 7 days" + sigText, Tone.DIM),
                 )
-                else -> line("No kills in 24 h · " + kills.whole("week") + " this week" + sigText, Tone.DIM)
+                else -> line("No kills in 24 h · " + kills.whole("week") + " in 7 days" + sigText, Tone.DIM)
             }
         } else {
             lines += line("No location reading yet.", Tone.DIM)
@@ -306,15 +349,19 @@ object Faces {
             } else {
                 val list = loot.num("list")
                 val now = loot.num("now")
-                val volume = w.count(loot.whole("m3")) + " m³"
                 lines += if (list != null && now != null) {
-                    line("Loot: list " + w.isk(list) + " or sell now " + w.isk(now) + " · " + volume)
+                    line("Loot: list " + w.isk(list) + " · sell now " + w.isk(now))
                 } else {
-                    line("Loot: about " + w.isk(loot.num("value") ?: 0.0) + " · " + volume)
+                    line("Loot: about " + w.isk(loot.num("value") ?: 0.0))
                 }
                 val hub = loot.text("hub")
                 lines += line(
-                    dots(listOf(if (hub.isEmpty()) "" else "Best single hub to list: $hub", "in " + plural(loot.whole("places"), "place"))),
+                    dots(
+                        listOf(
+                            if (hub.isEmpty()) "" else "Best hub to list: $hub",
+                            w.count(loot.whole("m3")) + " m³ in " + plural(loot.whole("places"), "place"),
+                        ),
+                    ),
                     Tone.DIM,
                 )
             }

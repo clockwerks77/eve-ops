@@ -7,15 +7,18 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.format.DateFormat
 import android.text.style.ForegroundColorSpan
 import android.util.SizeF
+import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import java.time.ZoneId
+import kotlin.math.roundToInt
 
 /** The three home-screen widgets. Each has its own layout file, all with the same views in them. */
 enum class Kind(val layout: Int, val view: String, val provider: Class<out AppWidgetProvider>) {
@@ -72,33 +75,74 @@ object Widgets {
         return out
     }
 
-    /**
-     * A widget's views for every height: one version per number of lines, each tagged with the height it needs.
-     * The launcher shows the fullest one that fits, so a line is either whole or absent, never cut in half.
-     */
-    fun views(ctx: Context, kind: Kind): RemoteViews {
-        val face = face(ctx, kind)
-        val scale = ctx.resources.configuration.fontScale
-        val bySize = LinkedHashMap<SizeF, RemoteViews>()
-        for (n in 1..Fit.MAX_LINES) bySize[SizeF(120f, Fit.needed(n, scale))] = build(ctx, kind, face, n)
-        return RemoteViews(bySize)
+    /** Sizes to cover when a launcher does not say how large it shows a widget. At most 16 are allowed. */
+    private val DEFAULT_SIZES: List<SizeF> =
+        listOf(250f, 330f, 400f, 600f).flatMap { w -> listOf(110f, 150f, 190f, 250f).map { h -> SizeF(w, h) } }
+
+    /** The sizes, in dp, at which the launcher shows this widget: upright and on its side, folded and unfolded. */
+    fun sizesOf(manager: AppWidgetManager, id: Int): List<SizeF> {
+        val options = manager.getAppWidgetOptions(id) ?: return emptyList()
+        val exact: List<SizeF>? = if (Build.VERSION.SDK_INT >= 33) {
+            options.getParcelableArrayList(AppWidgetManager.OPTION_APPWIDGET_SIZES, SizeF::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            options.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+        }
+        if (!exact.isNullOrEmpty()) return exact
+        val upright = SizeF(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH).toFloat(),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT).toFloat(),
+        )
+        val sideways = SizeF(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH).toFloat(),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT).toFloat(),
+        )
+        return listOf(upright, sideways).filter { it.width > 0f && it.height > 0f }
     }
 
-    /** The version of a widget with exactly this many lines. */
-    fun single(ctx: Context, kind: Kind, lines: Int): RemoteViews = build(ctx, kind, face(ctx, kind), lines)
+    /**
+     * A widget's views for each size it is shown at. Every size gets its own version: as many whole lines
+     * as fit, drawn as large as that size allows. The launcher shows the version made for its current size,
+     * so the text follows the widget as it is resized.
+     */
+    fun views(ctx: Context, kind: Kind, sizes: List<SizeF>): RemoteViews {
+        val face = face(ctx, kind)
+        val fontScale = ctx.resources.configuration.fontScale
+        val wanted = sizes.ifEmpty { DEFAULT_SIZES }.distinct().take(16)
+        val bySize = LinkedHashMap<SizeF, RemoteViews>()
+        for (size in wanted) {
+            bySize[size] = build(ctx, kind, face, Fit.plan(size.width, size.height, face.lines.size, fontScale))
+        }
+        return if (bySize.size == 1) bySize.values.first() else RemoteViews(bySize)
+    }
 
-    private fun build(ctx: Context, kind: Kind, face: Face, lines: Int): RemoteViews {
+    private fun build(ctx: Context, kind: Kind, face: Face, plan: Fit.Plan): RemoteViews {
         val v = RemoteViews(ctx.packageName, kind.layout)
+        val k = plan.scale
+        val dip = TypedValue.COMPLEX_UNIT_DIP
+        val density = ctx.resources.displayMetrics.density
+        fun px(dp: Float): Int = (dp * density).roundToInt()
+
+        v.setViewLayoutHeight(R.id.head, Fit.HEAD * k, dip)
+        v.setViewLayoutWidth(R.id.refresh, 40f * k, dip)
+        v.setViewPadding(R.id.refresh, px(9f * k), px(5f * k), px(9f * k), px(5f * k))
+        v.setTextViewTextSize(R.id.title, dip, Fit.TITLE * k)
+        v.setTextViewTextSize(R.id.as_of, dip, Fit.SMALL * k)
+        v.setTextViewTextSize(R.id.big, dip, Fit.BIG * k)
+        v.setTextViewTextSize(R.id.big_note, dip, Fit.SMALL * k)
+
         v.setTextViewText(R.id.title, face.title)
         v.setTextViewText(R.id.as_of, if (Snapshots.refreshing(ctx)) "refreshing" else face.asOf)
         v.setTextViewText(R.id.big, face.big)
         v.setTextViewText(R.id.big_note, face.bigNote)
         for (i in LINES.indices) {
-            val line = if (i < lines) face.lines.getOrNull(i) else null
+            val line = if (i < plan.lines) face.lines.getOrNull(i) else null
             if (line == null) {
                 v.setViewVisibility(LINES[i], View.GONE)
             } else {
                 v.setViewVisibility(LINES[i], View.VISIBLE)
+                v.setTextViewTextSize(LINES[i], dip, Fit.LINE * k)
+                v.setViewLayoutMargin(LINES[i], RemoteViews.MARGIN_TOP, plan.gap, dip)
                 v.setTextViewText(LINES[i], styled(ctx, line))
             }
         }
@@ -121,22 +165,24 @@ object Widgets {
     fun updateAll(ctx: Context) {
         val manager = AppWidgetManager.getInstance(ctx) ?: return
         for (kind in Kind.values()) {
-            val ids = manager.getAppWidgetIds(ComponentName(ctx, kind.provider))
-            if (ids.isNotEmpty()) manager.updateAppWidget(ids, views(ctx, kind))
+            for (id in manager.getAppWidgetIds(ComponentName(ctx, kind.provider))) {
+                manager.updateAppWidget(id, views(ctx, kind, sizesOf(manager, id)))
+            }
         }
     }
 }
 
 abstract class EveWidget(private val kind: Kind) : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
-        manager.updateAppWidget(ids, Widgets.views(context, kind))
+        for (id in ids) manager.updateAppWidget(id, Widgets.views(context, kind, Widgets.sizesOf(manager, id)))
         Refresh.schedule(context)
         val signedIn = Auth.session(context, Config.TRADER) != null
         if (signedIn && System.currentTimeMillis() - Snapshots.savedAt(context) > Widgets.STALE_MS) Refresh.now(context)
     }
 
+    /** The widget was resized (or the phone folded, unfolded or turned): draw it again for its new sizes. */
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) {
-        manager.updateAppWidget(id, Widgets.views(context, kind))
+        manager.updateAppWidget(id, Widgets.views(context, kind, Widgets.sizesOf(manager, id)))
     }
 
     override fun onReceive(context: Context, intent: Intent) {

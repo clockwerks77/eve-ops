@@ -4,14 +4,14 @@ import os
 
 SAMPLES = {
     'trading': ('Trading', 'as of 2:35 PM', '14.83B', 'overall wealth, both', [
-        '5 to change · 2 your call', 'Hek 3 (here) · Rens 1 · Amarr 1', 'Wallet 6.45B · buy orders 589.1M · on sale 2.31B',
-        'Net this week +318.9M · today +12.4M', '41 sell orders · 12 buy orders · 53 of 113 slots', 'Docked in Hek']),
+        '5 to change · 2 your call', 'Hek 3 (here) · Rens 1 · Amarr 1', 'Wallet 6.45B · bids 589.1M · on sale 2.31B',
+        'Net this week +318.9M · today +12.4M', '', '']),
     'pi': ('Planetary Interaction', 'as of 2:35 PM', '52.3M', 'waiting on the planets', [
-        'Worth a stop now', '5,720 units · 4,290 m³ · +9.1M a day', 'Eystur · 1 jump from Hek · 7 from you',
-        '6 colonies stop Thu 2:20 PM (in 2 days)', 'Fullest storage 43%', '']),
+        'Worth a stop now', '5,720 units · 4,290 m³ · +9.1M a day', '6 colonies stop Thu 2:20 PM (in 2 days)',
+        'Eystur · 1 jump from Hek · 7 from you', '', '']),
     'wormhole': ('Wormholes', 'as of 2:35 PM', 'J142117', 'C4', [
-        'Docked at THWR HQ · Astero', 'No effect · C247 to C3, 16 h · H900 to C5, 24 h', 'No kills in 24 h · 3 this week · 9 signatures',
-        'Loot: list 102.6M or sell now 91.0M · 31 m³', 'Best single hub to list: Rens · in 4 places', '']),
+        'Docked at THWR HQ · Astero', 'No effect · C247 to C3 · H900 to C5', 'No kills in 24 h · 3 in 7 days · 9 signatures',
+        'Loot: list 102.6M · sell now 91.0M', '', '']),
 }
 
 HEAD = '''<?xml version="1.0" encoding="utf-8"?>
@@ -29,8 +29,9 @@ HEAD = '''<?xml version="1.0" encoding="utf-8"?>
     android:paddingBottom="10dp">
 
     <LinearLayout
+        android:id="@+id/head"
         android:layout_width="match_parent"
-        android:layout_height="30dp"
+        android:layout_height="32dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -49,10 +50,10 @@ HEAD = '''<?xml version="1.0" encoding="utf-8"?>
         <ImageView
             android:id="@+id/refresh"
             android:layout_width="40dp"
-            android:layout_height="30dp"
+            android:layout_height="match_parent"
             android:contentDescription="@string/refresh"
             android:paddingHorizontal="9dp"
-            android:paddingVertical="4dp"
+            android:paddingVertical="5dp"
             android:src="@drawable/ic_refresh" />
     </LinearLayout>
 

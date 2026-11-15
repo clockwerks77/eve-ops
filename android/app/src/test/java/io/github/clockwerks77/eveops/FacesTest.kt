@@ -25,9 +25,9 @@ class FacesTest {
             listOf(
                 "1 to check · 10 to change · 2 your call",
                 "Hek 2 (here) · Rens 1 · Dodixie 3 · Jita 4 · Amarr 1",
-                "Wallet 6.07B · buy orders 271.3M · on sale 681.6M",
+                "Wallet 6.07B · bids 271.3M · on sale 681.6M",
                 "Net this week +76.9M · today +1.4M",
-                "16 sell orders · 4 buy orders · 20 of 145 slots",
+                "16 sells · 4 bids · 20 of 145 slots",
                 "Docked in Hek · Prorator",
             ),
             f.lines.map(::text),
@@ -64,11 +64,11 @@ class FacesTest {
         assertEquals("C3", f.bigNote)
         assertEquals(
             listOf(
-                "Docked at J111613 - Sample Fortizar · Stratios “Deep Dive”",
-                "Cataclysmic Variable · E175 to C4, 16 h",
-                "1 kill here in 24 h · 3 this week · 6 signatures",
-                "Loot: list 140.0M or sell now 125.6M · 5,105 m³",
-                "Best single hub to list: Hek · in 3 places",
+                "Docked at Sample Fortizar · Stratios",
+                "Cataclysmic Variable · E175 to C4",
+                "1 kill in 24 h · 3 in 7 days · 6 signatures",
+                "Loot: list 140.0M · sell now 125.6M",
+                "Best hub to list: Hek · 5,105 m³ in 3 places",
                 "Training Archaeology V, done Sat 6:28 AM",
             ),
             f.lines.map(::text),
@@ -107,22 +107,49 @@ class FacesTest {
         val s = JSONObject(sample.toString())
         s.getJSONObject("pi").put("go", "wait").put("reach", 3)
         s.put("problems", 2)
-        assertEquals("Not worth a stop yet · reaches 50.0M in 3 days", text(Faces.planets(s, words).lines[0]))
+        assertEquals("Not yet · reaches 50.0M in 3 days", text(Faces.planets(s, words).lines[0]))
         assertEquals("2 data feeds did not load", text(Faces.trading(s, words).lines[5]))
         s.getJSONObject("pi").put("reach", -1)
-        assertEquals("Not worth a stop yet · under 50.0M all week", text(Faces.planets(s, words).lines[0]))
+        assertEquals("Not yet · under 50.0M all week", text(Faces.planets(s, words).lines[0]))
     }
 
     @Test
-    fun linesThatFit() {
-        assertEquals(5, Fit.linesFor(190f, 1f))
-        assertEquals(6, Fit.linesFor(210f, 1f))
-        assertEquals(2, Fit.linesFor(120f, 1f))
-        assertEquals(1, Fit.linesFor(110f, 1f))
-        assertEquals(1, Fit.linesFor(60f, 1f))            // never fewer than the headline call
-        assertEquals(6, Fit.linesFor(400f, 1f))
-        assertTrue(Fit.linesFor(190f, 1.3f) < Fit.linesFor(190f, 1f))     // larger text, fewer lines
-        for (n in 1 until Fit.MAX_LINES) assertTrue(Fit.needed(n, 1f) < Fit.needed(n + 1, 1f))
+    fun textFollowsTheWidgetsSize() {
+        // a phone's 4-by-2 space: four whole lines, a little over the base size
+        val phone = Fit.plan(350f, 200f, 6, 1f)
+        assertEquals(4, phone.lines)
+        assertEquals(1.089f, phone.scale, 0.01f)
+        assertTrue(Fit.needed(phone.lines, phone.scale) <= 200f)
+        // the smallest space keeps two lines, slightly smaller
+        val small = Fit.plan(350f, 120f, 6, 1f)
+        assertEquals(2, small.lines)
+        assertEquals(0.896f, small.scale, 0.01f)
+        // taller at the same width: every line, text held by the width, lines spread over the spare height
+        val tall = Fit.plan(350f, 300f, 6, 1f)
+        assertEquals(6, tall.lines)
+        assertEquals(phone.scale, tall.scale, 0.001f)
+        assertTrue(tall.gap > Fit.GAP)
+        // wider and taller, as on a tablet: the text grows
+        val tablet = Fit.plan(700f, 400f, 6, 1f)
+        assertEquals(6, tablet.lines)
+        assertEquals(1.838f, tablet.scale, 0.01f)
+        assertEquals(Fit.MAX_SCALE, Fit.plan(1400f, 900f, 6, 1f).scale, 0.001f)
+        // a larger system font asks for larger text, at the cost of lines
+        assertEquals(4, Fit.plan(700f, 200f, 6, 1f).lines)
+        val large = Fit.plan(700f, 200f, 6, 1.3f)
+        assertEquals(3, large.lines)
+        assertTrue(large.scale >= 1.3f)
+        // fewer lines to show than would fit; and a sliver of a widget
+        assertEquals(2, Fit.plan(350f, 300f, 2, 1f).lines)
+        val sliver = Fit.plan(180f, 60f, 6, 1f)
+        assertEquals(1, sliver.lines)
+        assertEquals(Fit.MIN_SCALE, sliver.scale, 0.001f)
+        // whatever the size, the plan never needs more height than there is (down to the smallest text)
+        for (w in listOf(250f, 330f, 420f, 640f, 900f)) for (h in listOf(110f, 150f, 190f, 250f, 400f)) {
+            val p = Fit.plan(w, h, 6, 1f)
+            assertTrue("$w x $h", Fit.needed(p.lines, p.scale) <= h + 0.5f)
+            assertTrue(p.lines in 1..Fit.MAX_LINES)
+        }
     }
 
     @Test

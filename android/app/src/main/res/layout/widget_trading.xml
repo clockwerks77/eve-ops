@@ -13,8 +13,9 @@
     android:paddingBottom="10dp">
 
     <LinearLayout
+        android:id="@+id/head"
         android:layout_width="match_parent"
-        android:layout_height="30dp"
+        android:layout_height="32dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -33,10 +34,10 @@
         <ImageView
             android:id="@+id/refresh"
             android:layout_width="40dp"
-            android:layout_height="30dp"
+            android:layout_height="match_parent"
             android:contentDescription="@string/refresh"
             android:paddingHorizontal="9dp"
-            android:paddingVertical="4dp"
+            android:paddingVertical="5dp"
             android:src="@drawable/ic_refresh" />
     </LinearLayout>
 
@@ -74,7 +75,7 @@
         android:id="@+id/line3"
         style="@style/W.Line"
         android:paddingEnd="10dp"
-        android:text="Wallet 6.45B · buy orders 589.1M · on sale 2.31B" />
+        android:text="Wallet 6.45B · bids 589.1M · on sale 2.31B" />
 
     <TextView
         android:id="@+id/line4"
@@ -86,11 +87,13 @@
         android:id="@+id/line5"
         style="@style/W.Line"
         android:paddingEnd="10dp"
-        android:text="41 sell orders · 12 buy orders · 53 of 113 slots" />
+        android:text=""
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/line6"
         style="@style/W.Line"
         android:paddingEnd="10dp"
-        android:text="Docked in Hek" />
+        android:text=""
+        android:visibility="gone" />
 </LinearLayout>

@@ -8,7 +8,8 @@
         <item name="android:colorAccent">@color/isk</item>
     </style>
 
-    <!-- Widget text. Launchers will not load an app's own font files, so this uses the system's condensed face. -->
+    <!-- Widget text. Launchers will not load an app's own font files, so this uses the system's condensed face.
+         The sizes here are what the widget picker shows; on the home screen the app sets them to suit each widget's size (Fit in Faces.kt). -->
     <style name="W">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
@@ -20,20 +21,20 @@
     </style>
     <style name="W.Title">
         <item name="android:fontFamily">sans-serif-condensed-medium</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:textSize">15sp</item>
     </style>
     <style name="W.Dim">
-        <item name="android:textSize">12sp</item>
+        <item name="android:textSize">12.5sp</item>
         <item name="android:textColor">@color/dim</item>
     </style>
     <style name="W.Big">
         <item name="android:fontFamily">sans-serif-condensed-medium</item>
-        <item name="android:textSize">26sp</item>
+        <item name="android:textSize">30sp</item>
         <item name="android:includeFontPadding">false</item>
     </style>
     <style name="W.Line">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_marginTop">3dp</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:textSize">16sp</item>
     </style>
 </resources>
