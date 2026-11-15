@@ -275,6 +275,125 @@
     return m;
   }
 
+  // ---------------------------------------------------------------- checks
+  /**
+   * Mistakes worth catching fast on one order. Returns a list of short sentences (empty = fine).
+   * o: { isBuy, price, duration, known (station is one of your hubs), front, wall, cost, netMult }
+   */
+  function orderChecks(o) {
+    const out = [];
+    const pct = x => Math.round(Math.abs(x) * 100) + '%';
+    if (!o.known) out.push('Not at one of your hubs.');
+    if (o.duration < 90) out.push('Listed for ' + o.duration + (o.duration === 1 ? ' day' : ' days') + ', not 90.');
+    if (o.isBuy) {
+      if (o.wall != null && o.price >= o.wall * 1.25) out.push(pct(o.price / o.wall - 1) + ' above the next bid. Check for a typo.');
+    } else {
+      if (o.front != null && o.price <= o.front * 0.7) out.push(pct(1 - o.price / o.front) + ' under the next seller. Check for a typo.');
+      else if (o.front != null && o.price >= o.front * 1.5) out.push(pct(o.price / o.front - 1) + ' above the front. Check for a typo.');
+      if (o.cost != null && o.cost > 0 && o.price * o.netMult < o.cost) out.push('Sells below your cost.');
+    }
+    return out;
+  }
+
+  /** Last `days` complete days of a region's price history: volume-weighted price and units a day. */
+  function weekOf(history, days) {
+    const rows = history.slice(-days);
+    const vol = sum(rows, r => r.volume);
+    if (!rows.length || !vol) return null;
+    return { price: sum(rows, r => r.average * r.volume) / vol, perDay: vol / rows.length, days: rows.length };
+  }
+  /** How a far-off front compares with the week: 'dump' (well below it), 'repricing' (the week is already there) or 'unclear'. */
+  function moveRead(front, weekPrice) {
+    if (front <= weekPrice * 0.93) return 'dump';
+    if (front >= weekPrice * 0.97) return 'repricing';
+    return 'unclear';
+  }
+
+  // --------------------------------------------------------------- planets
+  /** Units an extractor yields in cycle k (0-based) of its program. EVE's own decay-and-wobble curve. */
+  function programOutput(base, cycleMs, k) {
+    const barWidth = cycleMs / 900000;
+    const t = (k + 0.5) * barWidth;
+    const decay = base / (1 + t * 0.012);
+    const phase = Math.pow(base, 0.7);
+    const wobble = Math.max(0, (Math.cos(phase + t / 12) + Math.cos(phase / 2 + t / 5) + Math.cos(t / 2)) / 3);
+    return Math.floor(barWidth * decay * (1 + 0.8 * wobble));
+  }
+
+  /**
+   * Roll a colony forward from the moment EVE last recorded it. ESI only reports a colony as it was
+   * when last opened in game, so what is on the planet now has to be worked out.
+   * col: { at, pins: [{ id, kind: 'ecu'|'basic'|'advanced'|'store', cap, contents: [[type, units]], lastStart,
+   *        ex: { prod, base, cycle, start, end } }], routes: [[fromPin, toPin, type, units]] }
+   * times: ascending ms (>= col.at).  vol(type): m3 per unit.
+   * Returns, for each time, Map(storePinId -> Map(type -> units)).
+   * Handles extractor -> factory -> factory -> storage chains (P0 to P1 to P2); anything else passes through untouched.
+   */
+  function piRun(col, times, vol) {
+    const STEP = 900000;
+    const pins = new Map();
+    for (const p of col.pins) pins.set(p.id, { id: p.id, kind: p.kind, cap: p.cap || 0, buf: new Map(p.contents || []), ex: p.ex || null, lastStart: p.lastStart || 0, busy: 0, need: new Map(), out: null, k: 0 });
+    const from = new Map();
+    for (const r of col.routes) {
+      const src = pins.get(r[0]), dst = pins.get(r[1]);
+      if (!src || !dst) continue;
+      if (!from.has(src.id)) from.set(src.id, []);
+      from.get(src.id).push({ to: dst.id, type: r[2], qty: r[3] });
+      if (dst.kind === 'basic') dst.need.set(r[2], 3000);
+      if (dst.kind === 'advanced') dst.need.set(r[2], 40);
+      if (src.kind === 'basic') src.out = { type: r[2], qty: 20, cycle: 1800000 };
+      if (src.kind === 'advanced') src.out = { type: r[2], qty: 5, cycle: 3600000 };
+    }
+    for (const list of from.values()) list.sort((a, b) => (pins.get(a.to).kind === 'store') - (pins.get(b.to).kind === 'store')); // factories are served before storage
+    for (const p of pins.values()) {
+      if (p.ex) p.k = Math.max(0, Math.floor((col.at - p.ex.start) / p.ex.cycle));
+      if (p.out && p.lastStart + p.out.cycle > col.at) p.busy = p.lastStart + p.out.cycle;
+    }
+    const used = p => { let v = 0; for (const e of p.buf) v += e[1] * vol(e[0]); return v; };
+    const room = (p, type) => (p.kind === 'store' ? Math.max(0, Math.floor((p.cap - used(p)) / vol(type) + 1e-6))
+      : p.need.has(type) ? Math.max(0, p.need.get(type) - (p.buf.get(type) || 0)) : 0);
+    const move = (src, r, have, fromBuf) => {
+      const dst = pins.get(r.to);
+      const n = Math.min(r.qty, have, room(dst, r.type));
+      if (n <= 0) return 0;
+      dst.buf.set(r.type, (dst.buf.get(r.type) || 0) + n);
+      if (fromBuf) src.buf.set(r.type, src.buf.get(r.type) - n);
+      return n;
+    };
+    const emit = (src, type, units) => { for (const r of from.get(src.id) || []) if (r.type === type && units > 0) units -= move(src, r, units, false); };
+    const topUp = () => {
+      for (const p of pins.values()) {
+        if (p.kind !== 'store') continue;
+        for (const r of from.get(p.id) || []) if (pins.get(r.to).kind !== 'store') move(p, r, p.buf.get(r.type) || 0, true);
+      }
+    };
+    const snap = () => { const m = new Map(); for (const p of pins.values()) if (p.kind === 'store') m.set(p.id, new Map(p.buf)); return m; };
+    const out = [];
+    const last = times[times.length - 1];
+    for (let t = col.at, i = 0; ; t += STEP) {
+      while (i < times.length && times[i] <= t) { out.push(snap()); i++; }
+      if (i >= times.length || t > last) break;
+      const next = t + STEP;
+      for (const p of pins.values()) {
+        if (!p.ex) continue;
+        for (let fire = p.ex.start + (p.k + 1) * p.ex.cycle; fire <= next && fire <= p.ex.end; fire += p.ex.cycle) { emit(p, p.ex.prod, programOutput(p.ex.base, p.ex.cycle, p.k)); p.k++; }
+      }
+      for (const p of pins.values()) if (p.out && p.busy && p.busy <= next) { p.busy = 0; emit(p, p.out.type, p.out.qty); }
+      topUp();
+      for (const p of pins.values()) {
+        if (!p.out || p.busy || !p.need.size) continue;
+        let ready = true;
+        for (const e of p.need) if ((p.buf.get(e[0]) || 0) < e[1]) ready = false;
+        if (!ready) continue;
+        for (const e of p.need) p.buf.set(e[0], p.buf.get(e[0]) - e[1]);
+        p.busy = next + p.out.cycle;
+      }
+      topUp();
+    }
+    while (out.length < times.length) out.push(snap());
+    return out;
+  }
+
   // ------------------------------------------------------------ formatting
   function isk(n) {
     if (n == null || !isFinite(n)) return '';
@@ -308,6 +427,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
+    orderChecks, weekOf, moveRead, programOutput, piRun,
     isk, short, span, sec,
   };
 });

@@ -22,6 +22,8 @@
     2281: 'Multispectrum Shield Hardener II', 2048: 'Damage Control II', 2404: 'Light Missile Launcher II',
     2488: 'Warrior II', 33474: 'Mobile Depot', 1183: 'Small Armor Repairer II', 3041: 'Small Focused Pulse Laser II',
     2329: 'Biocells', 9832: 'Coolant', 12733: 'Prorator',
+    2288: 'Carbon Compounds', 2270: 'Noble Metals', 2396: 'Biofuels', 2399: 'Precious Metals', 2473: 'Barren Basic Industry Facility',
+    2474: 'Barren Advanced Industry Facility', 2524: 'Barren Command Center', 2544: 'Barren Launchpad', 2848: 'Barren Extractor Control Unit',
     3443: 'Trade', 3444: 'Retail', 16596: 'Wholesale', 18580: 'Tycoon', 33399: 'Infomorph Synchronizing', 16622: 'Accounting',
   };
 
@@ -38,7 +40,7 @@
     [2889, ST.hek, 48, 16, 1764000, 1420000, 1520000, [[1759000, 80], [1761000, 12], [1770000, 6]], 8, 1.1],
     [33474, ST.hek, 26, 19, 1657000, 1480000, 1495000, [[1470000, 104], [1649000, 4]], 12, 3],
     [1183, ST.hek, 60, 43, 719600, 571000, 610000, [[719500, 3], [724000, 30]], 7, 0.4],
-    [2048, ST.hek, 40, 26, 1496000, 1210000, 1290000, [[1471000, 56], [1480000, 9]], 9, 2],
+    [2048, ST.hek, 40, 26, 1496000, 1210000, 1290000, [[1420000, 56], [1480000, 9]], 9, 2],
     [22291, ST.dodixie, 20, 12, 887400, 720000, 765000, [[886900, 40], [888000, 25]], 6, 0.6],
     [22291, ST.dodixie, 120, 111, 887400, 720000, 765000, null, 6, 0.6],
     [438, ST.dodixie, 40, 27, 2037000, 1650000, 1760000, [[2029000, 15], [2041000, 22]], 6, 0.9],
@@ -95,7 +97,7 @@
   }
   tx.push({ transaction_id: tid++, date: iso(1.2 * D), type_id: 2329, location_id: ST.hek, quantity: 1400, unit_price: 9150, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
   for (const [type, total, left, bid, rivals] of bids) {
-    const mine = { order_id: oid++, type_id: type, location_id: ST.jita, region_id: 10000002, is_buy_order: true, price: bid, volume_remain: left, volume_total: total, issued: iso(40 * H), duration: 90, range: 'station', escrow: bid * left, min_volume: 1, is_corporation: false };
+    const mine = { order_id: oid++, type_id: type, location_id: ST.jita, region_id: 10000002, is_buy_order: true, price: bid, volume_remain: left, volume_total: total, issued: iso(type === 380 ? 3 * H : 40 * H), duration: type === 380 ? 1 : 90, range: 'station', escrow: bid * left, min_volume: 1, is_corporation: false };
     orders.push(mine);
     book(10000002, type).push(Object.assign({ system_id: 30000142 }, mine));
     rivals.forEach(([p, u], i) => rival(10000002, type, ST.jita, true, p, u, (5 + i * 9) * H));
@@ -104,7 +106,19 @@
     book(10000002, type)[book(10000002, type).length - 1].system_id = 30000144;
   }
 
-  const planets = [1, 2, 3, 4, 5, 6].map(i => ({ planet_id: 40150000 + i, planet_type: ['barren', 'gas', 'temperate', 'lava', 'oceanic', 'storm'][i - 1], solar_system_id: 30002545, last_update: iso(30 * H), num_pins: 12, owner_id: CHAR, upgrade_level: 4 }));
+  // planetary products on sale at every hub
+  [[ST.hek, 9150], [ST.rens, 9420], [ST.dodixie, 8870], [ST.amarr, 9010], [ST.jita, 8640]].forEach(([loc, px]) => rival(REGION[loc], 2329, loc, false, px, 5200, 6 * H));
+  const colony = i => {
+    const id = n => 1000000 * i + n, t0 = iso(34 * H), end = iso(i === 3 ? 2 * H : -62 * H);
+    const ecu = (n, prod, q) => ({ pin_id: id(n), type_id: 2848, latitude: 0, longitude: 0, install_time: t0, expiry_time: end, last_cycle_start: t0, extractor_details: { product_type_id: prod, qty_per_cycle: q, cycle_time: 3600, heads: [] }, contents: [] });
+    const fac = (n, type, sch) => ({ pin_id: id(n), type_id: type, latitude: 0, longitude: 0, schematic_id: sch, last_cycle_start: iso(48 * H), contents: [] });
+    const r = (a, b, type, qty, n) => ({ route_id: id(100 + n), source_pin_id: id(a), destination_pin_id: id(b), content_type_id: type, quantity: qty, waypoints: [] });
+    return { links: [], pins: [ecu(1, 2288, 2600 + i * 90), ecu(2, 2270, 1500 + i * 60), fac(3, 2473, 134), fac(4, 2473, 134), fac(5, 2473, 127), fac(6, 2473, 127), fac(7, 2474, 79), fac(8, 2474, 79),
+      { pin_id: id(9), type_id: 2524, latitude: 0, longitude: 0, contents: [] }, { pin_id: id(10), type_id: 2544, latitude: 0, longitude: 0, contents: [{ type_id: 2329, amount: 780 + i * 95 }] }],
+      routes: [r(1, 3, 2288, 3000, 1), r(1, 4, 2288, 3000, 2), r(1, 9, 2288, 16000, 3), r(2, 5, 2270, 3000, 4), r(2, 6, 2270, 3000, 5), r(2, 9, 2270, 6000, 6),
+        r(3, 7, 2396, 20, 7), r(5, 7, 2399, 20, 8), r(4, 8, 2396, 20, 9), r(6, 8, 2399, 20, 10), r(7, 10, 2329, 5, 11), r(8, 10, 2329, 5, 12)] };
+  };
+  const planets = [1, 2, 3, 4, 5, 6].map(i => ({ planet_id: 40150000 + i, planet_type: ['barren', 'gas', 'temperate', 'lava', 'oceanic', 'storm'][i - 1], solar_system_id: 30002543, last_update: iso(34 * H), num_pins: 10, owner_id: CHAR, upgrade_level: 4 }));
 
   function answer(data, ttl, age) { return Promise.resolve({ data, fetched: now, modified: now - (age || 0), expires: Date.now() + ttl }); }
 
@@ -135,13 +149,9 @@
       { jump_clone_id: 3, location_id: ST.jita, location_type: 'station', implants: [] },
     ] }, 2 * M, M);
     if (/\/planets\/$/.test(path)) return answer(planets, 10 * M, 4 * M);
-    if ((m = path.match(/\/planets\/(\d+)\/$/)) && /characters/.test(path)) {
-      const i = Number(m[1]) - 40150000;
-      return answer({ links: [], routes: [], pins: [
-        { pin_id: 1, type_id: 2254, latitude: 0, longitude: 0 },
-        { pin_id: 2, type_id: 3060, latitude: 0, longitude: 0, expiry_time: iso(-(i === 3 ? 2.2 * H : 20 * H + i * 9 * M)), extractor_details: { heads: [], product_type_id: 2268 } },
-      ] }, 10 * M, 4 * M);
-    }
+    if ((m = path.match(/\/planets\/(\d+)\/$/)) && /characters/.test(path)) return answer(colony(Number(m[1]) - 40150000), 10 * M, 4 * M);
+    if ((m = path.match(/\/universe\/types\/(\d+)\/$/))) return answer({ type_id: Number(m[1]), volume: { 2288: 0.005, 2270: 0.005, 2396: 0.19, 2399: 0.19, 2329: 0.75 }[m[1]] || 1, capacity: { 2524: 500, 2544: 10000 }[m[1]] || 0 }, D);
+    if ((m = path.match(/\/markets\/(\d+)\/history\/$/))) return answer([1, 2, 3, 4, 5, 6, 7, 8].map(i => ({ date: iso(i * D).slice(0, 10), average: 1540000 + i * 2100, highest: 1560000, lowest: 1500000, order_count: 9, volume: 20 + i })).reverse(), D);
     if (/\/markets\/prices\/$/.test(path)) return answer([{ type_id: 527, average_price: 884000 }, { type_id: 2329, average_price: 9100 }, { type_id: 12733, average_price: 251400000 }], 60 * M, 20 * M);
     if ((m = path.match(/\/markets\/(\d+)\/orders\/$/))) return answer(books[m[1] + ':' + q.type_id] || [], 5 * M, 2.4 * M);
     if ((m = path.match(/\/universe\/stations\/(\d+)\/$/))) return answer({ station_id: Number(m[1]), name: names[m[1]] || 'Station ' + m[1], system_id: SYS[m[1]] || 30000144 }, D);
@@ -152,6 +162,7 @@
       const r = routes[m[2] + ':' + (q.flag || 'shortest')];
       if (r && Number(m[1]) === 30002053) return answer(r, D);
       if (Number(m[1]) === 30000144 && Number(m[2]) === 30000142) return answer([30000144, 30000142], D);
+      if (Number(m[1]) === 30002053 && Number(m[2]) === 30002543) return answer([30002053, 30002543], D);
       return Promise.reject(new window.Esi.EsiError(404, 'No route found'));
     }
     return Promise.reject(new window.Esi.EsiError(404, 'Sample data has no answer for ' + path));

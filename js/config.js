@@ -24,6 +24,18 @@ window.EVEOPS_CONFIG = {
   // 0.39% of the new order value for each price change.
   fees: { broker: 0.015, salesTax: 0.03375, modify: 0.0039 },
 
+  // Your hubs. An order anywhere else is flagged for a look.
+  hubs: [
+    { station: 60005686, region: 10000042, name: 'Hek' },
+    { station: 60004588, region: 10000030, name: 'Rens' },
+    { station: 60011866, region: 10000032, name: 'Dodixie' },
+    { station: 60008494, region: 10000043, name: 'Amarr' },
+    { station: 60003760, region: 10000002, name: 'Jita' },
+  ],
+  // Planetary Interaction: where the products are sold (valued at that hub's lowest ask),
+  // and how much has to be waiting on the planets before a pickup is called worth a stop.
+  pi: { sellStation: 60005686, worth: 50e6 },
+
   // Jita 4-4 is the source market: its sell price is the reference for "is this a dump?".
   jita: { station: 60003760, region: 10000002, system: 30000142 },
 

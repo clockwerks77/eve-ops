@@ -36,7 +36,7 @@
 
   // ----------------------------------------- lookups kept between visits
   const STATIC = 'eveops.static.v1';
-  const K = Object.assign({ names: {}, systems: {}, stations: {}, planets: {}, routes: {} }, demo ? null : E.store.get(STATIC));
+  const K = Object.assign({ names: {}, systems: {}, stations: {}, planets: {}, routes: {}, types: {} }, demo ? null : E.store.get(STATIC));
   let saveTimer = 0;
   function saveStatic() {
     if (demo) return;
@@ -76,6 +76,12 @@
     K.systems[id] = { name: r.data.name, sec: r.data.security_status }; saveStatic();
     return K.systems[id];
   }
+  async function typeInfo(id) {
+    if (K.types[id]) return K.types[id];
+    const r = await E.get('/universe/types/' + id + '/');
+    K.types[id] = { v: r.data.volume || 0, cap: r.data.capacity || 0 }; saveStatic();
+    return K.types[id];
+  }
   async function planetName(id) {
     if (K.planets[id]) return K.planets[id];
     const r = await E.get('/universe/planets/' + id + '/');
@@ -98,7 +104,7 @@
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, wantWake: false, wake: null,
-    prices: new Map(), tab: null, follow: true,
+    prices: new Map(), tab: null, follow: true, hist: new Map(), piNear: null, piFrom: null,
   };
   const me = () => '/characters/' + S.who.id;
   function feed(name, entry) { S.feeds[name] = { at: entry.modified, next: entry.expires, err: null }; }
@@ -145,12 +151,56 @@
   }
   async function loadPlanets() {
     const r = await E.get(me() + '/planets/', { auth: true });
+    const now = Date.now();
+    const times = [0, 1, 2, 3, 4, 5, 6, 7].map(d => now + d * D);
     S.planets = await Promise.all(r.data.map(async p => {
       const pair = await Promise.all([E.get(me() + '/planets/' + p.planet_id + '/', { auth: true }), planetName(p.planet_id).catch(() => 'Planet ' + p.planet_id)]);
       const ex = pair[0].data.pins.filter(x => x.extractor_details).map(x => (x.expiry_time ? Date.parse(x.expiry_time) : 0));
-      return { id: p.planet_id, name: pair[1], type: p.planet_type, extractors: ex.length, expiry: ex.length ? Math.min.apply(null, ex) : null };
+      const base = { id: p.planet_id, name: pair[1], type: p.planet_type, system: p.solar_system_id, extractors: ex.length, expiry: ex.length ? Math.min.apply(null, ex) : null, product: null, units: null, fill: 0 };
+      try { Object.assign(base, await forecast(p, pair[0].data, times)); } catch (err) { base.forecastErr = err.message || String(err); }
+      return base;
     }));
     feed('Planets', r);
+  }
+  /** ESI shows a colony as it was when last opened in game; work out what is on it now and over the next week. */
+  async function forecast(p, d, times) {
+    const ids = new Set();
+    d.pins.forEach(x => { ids.add(x.type_id); (x.contents || []).forEach(c => ids.add(c.type_id)); });
+    d.routes.forEach(x => ids.add(x.content_type_id));
+    await Promise.all([resolveNames(Array.from(ids)), Promise.all(Array.from(ids).map(typeInfo))]);
+    const kind = id => {
+      const n = K.names[id] || '';
+      return /Extractor Control Unit/.test(n) ? 'ecu' : /Basic Industry/.test(n) ? 'basic' : /Advanced Industry/.test(n) ? 'advanced'
+        : /Command Center|Launchpad|Storage Facility/.test(n) ? 'store' : 'other';
+    };
+    const col = {
+      at: Date.parse(p.last_update),
+      pins: d.pins.map(x => ({
+        id: x.pin_id, kind: kind(x.type_id), cap: (K.types[x.type_id] || {}).cap || 0,
+        contents: (x.contents || []).map(c => [c.type_id, c.amount]),
+        lastStart: x.last_cycle_start ? Date.parse(x.last_cycle_start) : 0,
+        ex: x.extractor_details && x.expiry_time && x.install_time ? {
+          prod: x.extractor_details.product_type_id, base: x.extractor_details.qty_per_cycle, cycle: x.extractor_details.cycle_time * 1000,
+          start: Date.parse(x.install_time), end: Date.parse(x.expiry_time) } : null,
+      })),
+      routes: d.routes.map(x => [x.source_pin_id, x.destination_pin_id, x.content_type_id, x.quantity]),
+    };
+    const byId = new Map(col.pins.map(x => [x.id, x]));
+    let product = null; // what the colony makes: the output of its advanced factories, or of its basic ones if it has none
+    for (const tier of ['advanced', 'basic']) for (const rt of col.routes) if (product == null && (byId.get(rt[0]) || {}).kind === tier) product = rt[2];
+    if (product == null) return {};
+    const vol = t => (K.types[t] || {}).v || 1;
+    const snaps = L.piRun(col, times.map(t => Math.max(t, col.at)), vol);
+    const units = snaps.map(m => { let n = 0; for (const b of m.values()) n += b.get(product) || 0; return n; });
+    let fill = 0; // how full the storage that receives the product is
+    for (const rt of col.routes) {
+      const dst = byId.get(rt[1]);
+      if (rt[2] !== product || !dst || dst.kind !== 'store' || !dst.cap) continue;
+      let used = 0;
+      for (const e of snaps[0].get(dst.id)) used += e[1] * vol(e[0]);
+      fill = Math.max(fill, used / dst.cap);
+    }
+    return { product, units, fill, volume: vol(product) };
   }
   async function loadKills() {
     const r = await E.get('/universe/system_kills/');
@@ -166,6 +216,7 @@
       want.set(o.region_id + ':' + o.type_id, [o.region_id, o.type_id]);
       if (!o.is_buy_order) want.set(C.jita.region + ':' + o.type_id, [C.jita.region, o.type_id]);
     }
+    for (const p of S.planets) if (p.product) for (const hb of C.hubs) want.set(hb.region + ':' + p.product, [hb.region, p.product]);
     let oldest = Infinity, soonest = Infinity, failed = 0;
     await Promise.all(Array.from(want, async ([key, rt]) => {
       try {
@@ -225,6 +276,29 @@
       } catch (err) { out[id] = { err: err.message || String(err) }; }
     }));
     S.routes = out;
+    const sysId = (S.planets[0] || {}).system;
+    if (sysId) {
+      await system(sysId).catch(() => {});
+      const near = await Promise.all(C.hubs.map(async hb => {
+        try { const st = await station(hb.station); return { station: hb.station, name: hb.name, jumps: (await route(st.system, sysId, 'shortest')).length - 1 }; }
+        catch (err) { return { station: hb.station, name: hb.name, jumps: Infinity }; }
+      }));
+      S.piNear = near.sort((a, b) => a.jumps - b.jumps)[0];
+      S.piFrom = await route(from, sysId, 'shortest').then(x => x.length - 1, () => null);
+    }
+  }
+  /** A week of price history for each line flagged as a big move, so the call can be read against it. */
+  async function loadHistory() {
+    const m = build();
+    const jobs = [];
+    for (const st of m.stops) for (const r of st.sells) {
+      if (r.plan.kind !== 'big') continue;
+      const key = r.region + ':' + r.type;
+      if (S.hist.has(key)) continue;
+      S.hist.set(key, null);
+      jobs.push(E.get('/markets/' + r.region + '/history/', { query: { type_id: r.type } }).then(h => S.hist.set(key, L.weekOf(h.data, 7)), () => S.hist.delete(key)));
+    }
+    await Promise.all(jobs);
   }
 
   async function run() {
@@ -243,8 +317,11 @@
       if (S.ship) ids.push(S.ship.ship_type_id);
       await resolveNames(ids).catch(() => {});
       S.ready = true; paint();
-      await Promise.all([load('Market books', loadBooks), load('Planets', loadPlanets), load('Routes', loadRoutes), load('Item prices', loadPrices)]);
+      await load('Planets', loadPlanets);
+      await Promise.all([load('Market books', loadBooks), load('Routes', loadRoutes), load('Item prices', loadPrices)]);
       await loadReach().catch(() => {});
+      paint();
+      await loadHistory().catch(() => {});
     } finally {
       S.running = false;
       paint();
@@ -259,6 +336,7 @@
     const vel = L.velocity(led.sales, now);
     const myIds = new Set(S.orders.map(o => o.order_id));
     const windowDays = led.from ? (now - led.from) / D : 0;
+    const hubSet = new Set(C.hubs.map(x => x.station));
 
     const listedByType = new Map();
     for (const o of S.orders) if (!o.is_buy_order) listedByType.set(o.type_id, (listedByType.get(o.type_id) || 0) + o.volume_remain);
@@ -314,7 +392,9 @@
         stop(x.order.location_id).sells.push({
           id: x.order.order_id, type: x.order.type_id, name: nameOf(x.order.type_id), twin: g.length > 1,
           price, remain, total: x.order.volume_total, pos: x.pos, cost, vel: v,
-          expires: Date.parse(x.order.issued) + x.order.duration * D,
+          expires: Date.parse(x.order.issued) + x.order.duration * D, region: x.order.region_id,
+          week: S.hist.get(x.order.region_id + ':' + x.order.type_id) || null,
+          checks: L.orderChecks({ isBuy: false, price, duration: x.order.duration, known: hubSet.has(x.order.location_id), front: x.pos ? x.pos.front : null, cost, netMult: NET }),
           plan: plan.get(x.order.order_id) || { action: 'wait', reason: 'Waiting for the market book.', target: null },
           pin: pinOf(x.order.order_id, price),
         });
@@ -337,7 +417,8 @@
       stop(o.location_id).bids.push({
         id: o.order_id, type: o.type_id, name: nameOf(o.type_id), price, remain: pos ? pos.remain : o.volume_remain,
         total: o.volume_total, pos, escrow: o.escrow || 0, days: o.duration,
-        expires: Date.parse(o.issued) + o.duration * D,
+        expires: Date.parse(o.issued) + o.duration * D, region: o.region_id, week: null,
+        checks: L.orderChecks({ isBuy: true, price, duration: o.duration, known: hubSet.has(o.location_id), wall: pos ? pos.wall : null }),
         plan: pos ? L.planBid(pos, { broker: C.fees.broker, modify: C.fees.modify, bigMove: C.bigMove }) : { action: 'wait', reason: 'Waiting for the market book.', target: null },
         pin: pinOf(o.order_id, price),
       });
@@ -360,7 +441,7 @@
     }
 
     const rank = { tick: 0, optional: 1, wait: 2, none: 3, hold: 4 };
-    const order = r => (r.pin && !r.pin.done ? -1 : rank[r.plan.action] + (r.plan.action === 'hold' && r.pos && r.pos.status === 'leading' ? 1 : 0));
+    const order = r => (r.checks.length ? -2 : r.pin && !r.pin.done ? -1 : rank[r.plan.action] + (r.plan.action === 'hold' && r.pos && r.pos.status === 'leading' ? 1 : 0));
     const here = S.loc ? S.loc.station_id || S.loc.structure_id || null : null;
     const hop = id => {
       const s = K.systems[id] || { name: 'System ' + id, sec: 1 }, k = S.kills.get(id) || {};
@@ -383,6 +464,7 @@
         shortRoute: r.short ? r.short.map(hop) : null, safeRoute: r.safe && !same ? r.safe.map(hop) : null, routeErr: r.err || null,
         change: rows.filter(x => x.plan.action === 'tick' || (x.pin && !x.pin.done)).length,
         optional: rows.filter(x => x.plan.action === 'optional').length,
+        check: rows.filter(x => x.checks.length).length,
         waiting: rows.filter(x => x.pin && !x.pin.done).length,
         pinned: rows.filter(x => x.pin).length,
       });
@@ -401,13 +483,37 @@
     }
     const wealth = S.wallet == null ? null : S.wallet + escrow + listed + held;
 
+    const ask = (type, hb) => {
+      const b = S.books.get(hb.region + ':' + type);
+      if (!b) return null;
+      const px = b.orders.filter(o => !o.is_buy_order && o.location_id === hb.station && !myIds.has(o.order_id)).map(o => o.price);
+      return px.length ? Math.min.apply(null, px) : null;
+    };
+    const sellHub = C.hubs.find(x => x.station === C.pi.sellStation) || C.hubs[0];
+    const colonies = S.planets.filter(p => p.product && p.units).map(p => {
+      const asks = C.hubs.map(hb => ask(p.product, hb));
+      const price = ask(p.product, sellHub);
+      return Object.assign({}, p, { productName: nameOf(p.product), asks, price, best: Math.max.apply(null, asks.map(x => x || 0)),
+        listedUnits: listedByType.get(p.product) || 0, value: price != null ? p.units[0] * price : null });
+    });
+    const series = [0, 1, 2, 3, 4, 5, 6, 7].map(d => sum(colonies, c => (c.price || 0) * c.units[d]));
+    const reach = series.findIndex(v => v >= C.pi.worth);
+    const pi = !colonies.length ? null : {
+      colonies, series, value: series[0], perDay: series[1] - series[0], reach,
+      units: sum(colonies, c => c.units[0]), m3: sum(colonies, c => c.units[0] * c.volume),
+      full: Math.max.apply(null, colonies.map(c => c.fill)), near: S.piNear, from: S.piFrom,
+      system: (K.systems[colonies[0].system] || {}).name || 'the colonies', sellName: sellHub.name,
+      stopped: colonies.filter(c => c.expiry != null && c.expiry < now).length,
+    };
+    if (pi) pi.go = pi.full >= 0.85 ? 'full' : pi.value >= C.pi.worth ? 'worth' : 'wait';
+
     // which hub tab is showing: follow the character on arrival, otherwise leave the choice alone
     const at = list.find(s => s.docked) || list.find(s => s.inSystem);
     if (S.follow && at) { S.tab = at.id; S.follow = false; }
     if (!list.some(s => s.id === S.tab)) S.tab = list.length ? (at || list[0]).id : null;
 
     return {
-      now, stops: list, slow: slow.slice(0, 8), tab: S.tab,
+      now, stops: list, slow: slow.slice(0, 8), tab: S.tab, pi,
       wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
@@ -462,11 +568,19 @@
     const depthShown = r.pos && r.plan.action === 'tick' && r.plan.kind !== 'mismatch' && (r.pos.status === 'undercut' || r.pos.status === 'behind' || r.pos.status === 'outbid');
     const why = r.plan.action === 'hold' && lead ? null
       : r.plan.action === 'tick' ? (depthShown ? '' : r.plan.reason + ' ') + (r.plan.fee ? 'Changing costs ' + L.short(r.plan.fee) + '.' : '')
-      : r.plan.reason;
+      : String(r.plan.reason || '').replace(/^Sniper: (.)/, (x, c) => c.toUpperCase());
     const soon = r.expires - Date.now() < 3 * D;
-    return C_('call', 'Call', h('span', { class: 'chip ' + cls }, label), done && h('span', { class: 'chip chip-done' }, 'Changed'),
+    let read = null;
+    if (big && r.week && r.pos && r.pos.front != null) {
+      read = 'Week average ' + L.isk(Math.round(r.week.price)) + ' on ' + num(Math.round(r.week.perDay)) + ' a day: '
+        + { dump: 'looks like a dump.', repricing: 'the market has moved.', unclear: 'could be either.' }[L.moveRead(r.pos.front, r.week.price)];
+    }
+    return C_('call', 'Call',
+      r.checks.length ? h('span', { class: 'chip chip-check' }, 'Check') : null,
+      h('span', { class: 'chip ' + cls }, label), done && h('span', { class: 'chip chip-done' }, 'Changed'),
       soon && r.plan.action !== 'none' && h('span', { class: 'chip chip-opt' }, 'Expires ', live('until', r.expires)),
-      why && h('span', { class: 'why' }, why));
+      r.checks.length ? h('span', { class: 'why why-check' }, r.checks.join(' ')) : null,
+      why && h('span', { class: 'why' }, read ? why.replace(' Dump or repricing: your call.', '') + ' ' + read : why));
   }
   function typeCell(r) {
     const price = r.pin && !r.pin.done ? r.pin.price : (r.plan.action === 'tick' || r.plan.action === 'optional') ? r.plan.target : null;
@@ -524,13 +638,15 @@
       h('span', { class: 'hot' }, hot.length ? hot.slice(0, 8).map(x => x.name + ' ' + x.ship + '/' + x.pod).join(', ') + (hot.length > 8 ? ', and ' + (hot.length - 8) + ' more' : '') : 'No ships or pods lost on this route in the last hour'));
   }
 
-  function stopView(s) {
+  function stopView(s, m) {
     const state = s.docked ? 'Docked here' : s.inSystem ? 'In this system' : s.jumps != null ? plural(s.jumps, 'jump') + ' away' : '';
     const pinnable = s.sells.concat(s.bids).filter(r => r.plan.action === 'tick' && r.plan.target != null && !(r.pin && !r.pin.done));
     const summary = [];
+    if (s.check) summary.push(s.check + ' to check');
     if (s.change) summary.push(s.change + ' to change');
     if (s.optional) summary.push(s.optional + ' your call');
-    if (!s.change && !s.optional) summary.push('Nothing to change');
+    if (!s.change && !s.optional && !s.check) summary.push('Nothing to change');
+    const pickup = m.pi && m.pi.near && isFinite(m.pi.near.jumps) && m.pi.near.station === s.id && m.pi.go !== 'wait';
     return h('section', { class: 'stop' + (s.docked ? ' is-here' : ''), id: 'stop-' + s.id, role: 'tabpanel', 'aria-label': s.short },
       h('header', { class: 'stop-head' },
         h('div', { class: 'stop-title' },
@@ -541,6 +657,8 @@
           strip(s.safeRoute ? 'Shortest' : 'Route', s.shortRoute),
           s.safeRoute && strip('Secure', s.safeRoute)),
         s.routeErr && h('p', { class: 'stop-sub' }, 'No route found: ' + s.routeErr),
+        pickup && h('p', { class: 'pickup' }, h('span', { class: 'chip chip-lead' }, 'Planetary pickup'),
+          m.pi.system + ' is ' + plural(m.pi.near.jumps, 'jump') + ' from here, with about ' + L.short(m.pi.value) + ' of product waiting. ', h('a', { href: '#pi', onclick: e => { e.preventDefault(); document.getElementById('pi').scrollIntoView({ behavior: 'smooth' }); } }, 'See the planets')),
         h('div', { class: 'stop-tools' },
           pinnable.length ? h('button', { type: 'button', class: 'btn', onclick: () => pin(pinnable) }, 'Pin ' + plural(pinnable.length, 'price')) : null,
           s.pinned ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => unpin(s) }, 'Clear pins') : null)),
@@ -558,8 +676,36 @@
       return h('button', { type: 'button', role: 'tab', class: 'tab' + (on ? ' is-on' : '') + (s.docked ? ' is-here' : ''), 'aria-selected': on ? 'true' : 'false', onclick: () => pick(s.id) },
         h('span', { class: 'tab-name' }, s.short),
         h('span', { class: 'tab-sub' }, where),
-        h('span', { class: 'tab-count' + (s.change ? '' : ' is-zero') }, s.change ? s.change + ' to change' : 'Nothing to change'));
+        h('span', { class: 'tab-count' + (s.change || s.check ? '' : ' is-zero') }, (s.check ? s.check + ' to check' + (s.change ? ', ' : '') : '') + (s.change ? s.change + ' to change' : s.check ? '' : 'Nothing to change')),
+        m.pi && m.pi.near && isFinite(m.pi.near.jumps) && m.pi.near.station === s.id && m.pi.go !== 'wait' ? h('span', { class: 'tab-pi' }, 'Planetary pickup') : null);
     }));
+  }
+
+  function piView(m) {
+    const p = m.pi;
+    if (!p) return null;
+    const verdict = { full: 'launchpad nearly full', worth: 'worth a stop', wait: 'not yet' }[p.go];
+    const when = p.go !== 'wait' ? '' : p.reach > 0 ? 'Reaches ' + L.short(C.pi.worth) + (p.reach === 1 ? ' tomorrow. ' : ' in ' + p.reach + ' days. ') : 'Will not reach ' + L.short(C.pi.worth) + ' within a week at this pace. ';
+    const where = p.near && isFinite(p.near.jumps) ? p.system + ' is ' + plural(p.near.jumps, 'jump') + ' from ' + p.near.name + (p.from != null ? ' and ' + plural(p.from, 'jump') + ' from you. ' : '. ') : '';
+    return h('section', { class: 'pi', id: 'pi' },
+      h('header', { class: 'pi-head' },
+        h('h2', null, 'Planetary Interaction'),
+        h('span', { class: 'chip ' + (p.go === 'wait' ? 'chip-hold' : 'chip-lead') }, 'Pickup: ' + verdict),
+        h('span', { class: 'stop-sum' }, 'About ' + L.short(p.value) + ' waiting')),
+      h('p', { class: 'pi-note' }, plural(Math.round(p.units), 'unit') + ', ' + num(Math.round(p.m3)) + ' m\u00b3, growing about ' + L.short(p.perDay) + ' a day. ' + when + where
+        + (p.stopped ? plural(p.stopped, 'colony has', 'colonies have') + ' stopped extractors.' : '')),
+      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+        h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Product'), h('th', null, 'On planet'), h('th', null, 'A day'), h('th', null, 'Listed'),
+          C.hubs.map(hb => h('th', null, hb.name)), h('th', null, 'Value'))),
+        h('tbody', null, p.colonies.map(c => h('tr', null,
+          h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(c.product), h('span', null, c.productName,
+            h('span', { class: 'sub' }, c.name + ', ' + c.type + (c.expiry != null && c.expiry < m.now ? ', extractors stopped' : ''))))),
+          h('td', null, num(Math.round(c.units[0]))),
+          h('td', null, '+' + num(Math.round(c.units[1] - c.units[0]))),
+          h('td', null, c.listedUnits ? num(c.listedUnits) : ''),
+          c.asks.map(a => h('td', { class: a != null && a === c.best ? 'best' : '' }, a == null ? '' : L.isk(a))),
+          h('td', null, c.value == null ? '' : L.short(c.value))))))),
+      h('p', { class: 'note' }, 'Hub columns are the lowest ask in each station, highest marked. Value uses the ' + p.sellName + ' ask. EVE only reports a colony as it was when last opened in game, so the units are worked out from there: an estimate.'));
   }
 
   function pin(rows) {
@@ -689,7 +835,7 @@
       demo ? h('p', { class: 'banner' }, 'Sample data. Routes are real, the orders and ISK are invented. ', h('a', { href: './' }, 'Leave sample data')) : '',
       topView(m),
       m ? h('main', { class: 'board' },
-        h('div', { class: 'stops' }, m.stops.length ? [tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0])] : h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.')),
+        h('div', { class: 'stops' }, m.stops.length ? [tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m)]),
         h('aside', { class: 'side' }, weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), clonePanel(m), slowPanel(m), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);

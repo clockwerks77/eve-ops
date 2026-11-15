@@ -87,6 +87,7 @@ button { font: inherit; color: inherit; }
 .tab.is-here .tab-sub { color: var(--lead); font-weight: 500; }
 .tab-count { font-size: 0.86rem; font-weight: 600; color: var(--warn); }
 .tab-count.is-zero { color: var(--dim); font-weight: 400; }
+.tab-pi { font-size: 0.82rem; font-weight: 600; color: var(--lead); }
 
 /* --------------------------------------------------------------- stop */
 .stop { padding: 0.8rem var(--gap) 1.1rem; border-bottom: 1px solid var(--seam); border-left: 3px solid transparent; background: var(--hull); }
@@ -144,6 +145,7 @@ button { font: inherit; color: inherit; }
 .chip-go { color: var(--warn); }
 .chip-opt { color: var(--dim); }
 .chip-big { color: var(--isk); }
+.chip-check, .why-check { color: var(--bad); }
 .chip-hold { color: var(--calm); }
 .chip-lead, .chip-done { color: var(--lead); }
 .chip-pin { color: var(--isk); }
@@ -171,6 +173,21 @@ button { font: inherit; color: inherit; }
 .hangar { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--seam); font-size: 0.95rem; }
 .hangar-label { color: var(--dim); margin-right: 0.8rem; }
 .hangar-item { display: inline-block; margin-right: 1.2rem; }
+
+.pickup { margin-top: 0.6rem; font-size: 0.95rem; }
+
+/* planetary interaction: products, where they sell best, and whether a pickup is worth a stop */
+.pi { padding: 1rem var(--gap) 1.2rem; border-bottom: 1px solid var(--seam); }
+.pi-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 1rem; }
+.pi h2 { font-size: 1.3rem; font-weight: 600; }
+.pi-note { color: var(--dim); font-size: 0.9rem; margin-top: 0.2rem; }
+.pi-scroll { overflow-x: auto; margin-top: 0.7rem; }
+.pi-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+.pi-table th { font-weight: 400; color: var(--dim); font-size: 0.82rem; text-align: right; padding: 0 0 0.25rem 1rem; white-space: nowrap; }
+.pi-table td { text-align: right; padding: 0.3rem 0 0.3rem 1rem; border-top: 1px solid var(--seam); white-space: nowrap; vertical-align: middle; }
+.pi-table .l { text-align: left; padding-left: 0; }
+.pi-item { display: flex; align-items: center; gap: 0.55rem; }
+.pi-table .best { color: var(--lead); font-weight: 600; }
 
 /* wide: the rows become a table, labels move to one header line */
 @container (min-width: 49rem) {

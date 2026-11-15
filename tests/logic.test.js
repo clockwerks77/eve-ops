@@ -180,3 +180,68 @@ test('formatting', () => {
   assert.equal(L.sec(-0.4), 0);
   assert.equal(L.sec(0.45), 0.5);
 });
+
+test('order checks: the recurring mistakes', () => {
+  const ok = { isBuy: false, price: 1317000, duration: 90, known: true, front: 1320000, cost: 1090000, netMult: 0.95125 };
+  assert.deepEqual(L.orderChecks(ok), []);
+  assert.match(L.orderChecks(Object.assign({}, ok, { known: false }))[0], /Not at one of your hubs/);
+  assert.match(L.orderChecks(Object.assign({}, ok, { duration: 1 }))[0], /1 day, not 90/);
+  assert.match(L.orderChecks(Object.assign({}, ok, { price: 29050, front: 290500, cost: null }))[0], /90% under the next seller/); // decimal slip
+  assert.match(L.orderChecks(Object.assign({}, ok, { price: 13170000 }))[0], /above the front/);
+  assert.match(L.orderChecks(Object.assign({}, ok, { price: 1100000, front: 1105000 }))[0], /below your cost/);
+  assert.match(L.orderChecks({ isBuy: true, price: 5800000, duration: 90, known: true, wall: 579700 })[0], /above the next bid/);
+  assert.deepEqual(L.orderChecks({ isBuy: true, price: 579800, duration: 90, known: true, wall: 579700 }), []);
+});
+
+test('week of price history and how a big move reads against it', () => {
+  const h = [{ average: 300000, volume: 10 }, { average: 320000, volume: 60 }, { average: 318000, volume: 70 }];
+  const w = L.weekOf(h, 2);
+  assert.equal(Math.round(w.price), 318923);
+  assert.equal(w.perDay, 65);
+  assert.equal(L.weekOf([], 7), null);
+  assert.equal(L.moveRead(250000, 318000), 'dump');
+  assert.equal(L.moveRead(250000, 252000), 'repricing');
+  assert.equal(L.moveRead(300000, 318000), 'unclear');
+});
+
+// One of Adam's real colonies (barren, Biocells) as ESI reported it on 2026-11-13T20:31Z.
+const colony = () => ({
+  at: Date.parse('2026-11-13T20:31:09Z'),
+  pins: [
+    { id: 'b1', kind: 'basic', contents: [] }, { id: 'b2', kind: 'basic', contents: [[2288, 398]] },
+    { id: 'b3', kind: 'basic', contents: [[2270, 1652]] }, { id: 'b4', kind: 'basic', contents: [] },
+    { id: 'a1', kind: 'advanced', contents: [[2396, 20]] }, { id: 'a2', kind: 'advanced', contents: [[2396, 20]] },
+    { id: 'cc', kind: 'store', cap: 500, contents: [[2288, 55677], [2270, 44322]] },
+    { id: 'lp', kind: 'store', cap: 10000, contents: [[2329, 1065]] },
+    { id: 'e1', kind: 'ecu', ex: { prod: 2288, base: 3090, cycle: 3600000, start: Date.parse('2026-11-13T20:31:09Z'), end: Date.parse('2026-11-17T20:31:09Z') } },
+    { id: 'e2', kind: 'ecu', ex: { prod: 2270, base: 1636, cycle: 3600000, start: Date.parse('2026-11-13T20:31:09Z'), end: Date.parse('2026-11-17T20:31:09Z') } },
+  ],
+  routes: [['b1', 'a1', 2396, 20], ['b2', 'a2', 2396, 20], ['a2', 'lp', 2329, 5], ['b4', 'a1', 2399, 20], ['b3', 'a2', 2399, 20],
+    ['e2', 'b4', 2270, 3000], ['e2', 'b3', 2270, 3000], ['e2', 'cc', 2270, 5776], ['e1', 'b2', 2288, 3000], ['e1', 'b1', 2288, 3000], ['e1', 'cc', 2288, 16248], ['a1', 'lp', 2329, 5]],
+});
+const vol = t => ({ 2288: 0.005, 2270: 0.005, 2396: 0.19, 2399: 0.19, 2329: 0.75 }[t] || 1);
+
+test('extractor curve: bounded by 7.2x the base, and decays', () => {
+  // EVE sizes the extractor's routes to the curve's ceiling: 3090 x 7.2 = 22,248, the sum of this extractor's routes
+  assert.equal(3090 * 7.2, 3000 + 3000 + 16248);
+  let total = 0;
+  for (let k = 0; k < 96; k++) { const y = L.programOutput(3090, 3600000, k); assert.ok(y > 0 && y <= 22248); total += y; }
+  assert.ok(L.programOutput(3090, 3600000, 0) > 3 * L.programOutput(3090, 3600000, 95) / 2);
+  assert.ok(total > 300000 && total < 900000, String(total));
+});
+
+test('colony forecast: product accumulates at a believable pace and nothing goes negative', () => {
+  const c = colony(), H = 3600000;
+  const snaps = L.piRun(c, [c.at, c.at + 24 * H, c.at + 48 * H, c.at + 96 * H, c.at + 240 * H], vol);
+  const bio = snaps.map(s => s.get('lp').get(2329));
+  assert.equal(bio[0], 1065);
+  // two advanced factories at 5 units an hour each is the ceiling: 240 a day
+  for (let i = 1; i < bio.length; i++) assert.ok(bio[i] >= bio[i - 1], bio.join());
+  assert.ok(bio[1] - bio[0] >= 60 && bio[1] - bio[0] <= 240, bio.join());
+  assert.ok(bio[3] - bio[0] <= 960, bio.join());
+  assert.equal(bio[4], bio[4]); // program over: output stops growing once inputs run dry
+  assert.ok(bio[4] - bio[3] < 60, bio.join());
+  for (const s of snaps) for (const m of s.values()) for (const n of m.values()) assert.ok(n >= 0);
+  // the full command center cannot take more raw material
+  assert.ok(snaps[1].get('cc').get(2288) <= 100000);
+});
