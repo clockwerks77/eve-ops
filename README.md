@@ -33,6 +33,16 @@ Note that every site under `clockwerks77.github.io` shares the same browser stor
 - **Restock shortlist** (Jita tab): lines with four days of stock or less, or sold out this week, with units to bid, the bid to type and the net at the hub price.
 - **Pins**: "Pin prices" freezes the prices for a stop while you work through it. Each row then waits until the market book shows that exact price.
 
+## Wormholes tab
+
+A second view for a second character (signed in separately as the "wormhole pilot"):
+
+- **Tracking**: the pilot's system is read every 15 seconds. A change of system made while the page is open becomes a link in the chain; stargate jumps are not drawn. The chain is kept in this browser.
+- **Per system**: class (from the region), effect and statics (bundled table), kills over the last 7 days from zKillboard (EVE publishes none for wormhole space), and the signatures you paste from the probe scanner (Ctrl+A, Ctrl+C), grouped by type with new ones marked.
+- **System map**: sun, planets and any structure the pilot has docked in at their true bearing, distances compressed. Signatures sit on an outer ring because EVE gives no position for them. Hover or tab to anything for details.
+
+Wormhole statics, effects and wormhole types in `js/whdata.js` are derived from data files in [Wanderer](https://github.com/wanderer-industries/wanderer) (MIT License, Copyright (c) 2024 Wanderer Industries).
+
 ## How fresh the numbers are
 
 EVE republishes on its own timers and the page refetches as each one lapses:
@@ -66,6 +76,6 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
 - `js/demo.js` — sample data behind `#demo`
 - `tests/logic.test.js` — run with `node --test tests/logic.test.js`
 
-The page sets a content security policy that allows requests only to `esi.evetech.net` and `login.eveonline.com`, and scripts only from this repository.
+The page sets a content security policy that allows requests only to `esi.evetech.net`, `login.eveonline.com`, `zkillboard.com` and the page's own address, and scripts only from this repository.
 
 The typeface is Barlow Semi Condensed (SIL Open Font License, see `fonts/LICENSE-Barlow.txt`). EVE Online and its data belong to CCP hf.

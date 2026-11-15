@@ -309,6 +309,17 @@
     return 'unclear';
   }
 
+  /** Rows copied from the in-game probe scanner (Ctrl+A, Ctrl+C): one signature or anomaly per line, tab separated. */
+  function parseSigs(text) {
+    const out = [];
+    for (const line of String(text).split(/\r?\n/)) {
+      const c = line.split('\t').map(x => x.trim());
+      if (c.length < 3 || !/^[A-Z]{3}-\d{3}$/.test(c[0])) continue;
+      out.push({ id: c[0], scan: c[1] || '', group: c[2] || '', name: c[3] || '', signal: c[4] || '', dist: c[5] || '' });
+    }
+    return out;
+  }
+
   // --------------------------------------------------------------- planets
   /** Units an extractor yields in cycle k (0-based) of its program. EVE's own decay-and-wobble curve. */
   function programOutput(base, cycleMs, k) {
@@ -427,7 +438,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, programOutput, piRun,
+    orderChecks, weekOf, moveRead, programOutput, piRun, parseSigs,
     isk, short, span, sec,
   };
 });

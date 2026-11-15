@@ -4,6 +4,8 @@
   'use strict';
   const C = window.EVEOPS_CONFIG;
   const AUTH = 'eveops.auth', PKCE = 'eveops.pkce';
+  // A second character can be signed in beside the first: slot '' is the trader, 'scout' the wormhole pilot.
+  const key = slot => (slot ? AUTH + '.' + slot : AUTH);
 
   const store = {
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
@@ -30,10 +32,10 @@
   }
   const form = params => Object.entries(params).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
 
-  async function login() {
+  async function login(slot) {
     const verifier = randomString(32), state = randomString(16);
     const challenge = b64url(await sha256(verifier));
-    if (!store.set(PKCE, { verifier, state })) throw new EsiError(0, 'This browser is blocking storage, so the sign-in cannot be kept.');
+    if (!store.set(PKCE, { verifier, state, slot: slot || '' })) throw new EsiError(0, 'This browser is blocking storage, so the sign-in cannot be kept.');
     location.assign(C.sso + '/authorize/?' + form({
       response_type: 'code', redirect_uri: C.redirectUri, client_id: C.clientId,
       scope: C.scopes.join(' '), code_challenge: challenge, code_challenge_method: 'S256', state,
@@ -49,7 +51,7 @@
     return json;
   }
 
-  function saveToken(json) {
+  function saveToken(json, slot) {
     const claims = readJwt(json.access_token);
     const auth = {
       refresh: json.refresh_token, access: json.access_token,
@@ -57,7 +59,7 @@
       id: Number(String(claims.sub).split(':').pop()), name: claims.name,
       scopes: [].concat(claims.scp || []),
     };
-    store.set(AUTH, auth);
+    store.set(key(slot), auth);
     return auth;
   }
 
@@ -71,28 +73,28 @@
     store.del(PKCE);
     if (denied) throw new EsiError(0, 'EVE did not complete the sign-in (' + denied + ').');
     if (!p || p.state !== state) throw new EsiError(0, 'That sign-in did not start in this browser. Try again.');
-    saveToken(await tokenRequest({ grant_type: 'authorization_code', code, client_id: C.clientId, code_verifier: p.verifier }));
-    return true;
+    saveToken(await tokenRequest({ grant_type: 'authorization_code', code, client_id: C.clientId, code_verifier: p.verifier }), p.slot);
+    return p.slot || true;
   }
 
-  let refreshing = null;
-  async function token(force) {
-    const a = store.get(AUTH);
+  const refreshing = new Map();
+  async function token(force, slot) {
+    const a = store.get(key(slot));
     if (!a) throw new EsiError(401, 'Signed out.');
     if (!force && a.exp > Date.now()) return a.access;
-    if (!refreshing) {
-      refreshing = tokenRequest({ grant_type: 'refresh_token', refresh_token: a.refresh, client_id: C.clientId })
-        .then(saveToken, err => {
-          if (err.status === 400 || err.status === 401) store.del(AUTH); // EVE no longer accepts this sign-in
+    if (!refreshing.has(slot || '')) {
+      refreshing.set(slot || '', tokenRequest({ grant_type: 'refresh_token', refresh_token: a.refresh, client_id: C.clientId })
+        .then(json => saveToken(json, slot), err => {
+          if (err.status === 400 || err.status === 401) store.del(key(slot)); // EVE no longer accepts this sign-in
           throw err;
         })
-        .finally(() => { refreshing = null; });
+        .finally(() => { refreshing.delete(slot || ''); }));
     }
-    return (await refreshing).access;
+    return (await refreshing.get(slot || '')).access;
   }
 
-  function who() { const a = store.get(AUTH); return a ? { id: a.id, name: a.name, scopes: a.scopes || [] } : null; }
-  function signOut() { store.del(AUTH); }
+  function who(slot) { const a = store.get(key(slot)); return a ? { id: a.id, name: a.name, scopes: a.scopes || [] } : null; }
+  function signOut(slot) { store.del(key(slot)); }
 
   // ------------------------------------------------------------ requests
   const cache = new Map(), flying = new Map(), waiting = [];
@@ -117,7 +119,7 @@
     return limited(async () => {
       for (let attempt = 0; ; attempt++) {
         const headers = Object.assign({ Accept: 'application/json' }, init && init.headers);
-        if (auth) headers.Authorization = 'Bearer ' + await token(attempt > 0);
+        if (auth) headers.Authorization = 'Bearer ' + await token(attempt > 0, auth === true ? '' : auth);
         const res = await fetch(url, Object.assign({}, init, { headers }));
         if (res.status === 401 && auth && attempt === 0) continue; // access token went stale early: refresh once
         if (res.status === 420 || res.status === 429) {

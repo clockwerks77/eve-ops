@@ -104,7 +104,7 @@
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, wantWake: false, wake: null,
-    prices: new Map(), tab: null, follow: true, hist: new Map(), piNear: null, piFrom: null, history: [],
+    prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [],
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
   const me = () => '/characters/' + S.who.id;
@@ -976,6 +976,8 @@
     const f = S.feeds['Market books'];
     return h('header', { class: 'top' },
       h('div', { class: 'who' }, h('h1', null, S.who.name), h('p', null, where + ship)),
+      h('nav', { class: 'views', 'aria-label': 'Views' }, [['trade', 'Trading'], ['wh', 'Wormholes']].map(v =>
+        h('button', { type: 'button', class: 'view' + (S.view === v[0] ? ' is-on' : ''), 'aria-pressed': S.view === v[0] ? 'true' : 'false', onclick: () => setView(v[0]) }, v[1]))),
       m && h('dl', { class: 'purse' },
         h('div', null, h('dt', null, 'Overall wealth'), h('dd', { title: m.wealth == null ? '' : L.isk(Math.round(m.wealth)) }, m.wealth == null ? '' : L.short(m.wealth))),
         h('div', null, h('dt', null, 'Wallet'), h('dd', { title: m.wallet == null ? '' : L.isk(m.wallet) }, m.wallet == null ? '' : L.short(m.wallet))),
@@ -987,10 +989,19 @@
         h('button', { type: 'button', class: 'btn', disabled: S.running, onclick: run }, S.running ? 'Loading' : 'Refresh')));
   }
 
+  function setView(v) {
+    S.view = v;
+    if (!demo) history.replaceState(null, '', v === 'wh' ? '#wormholes' : location.pathname);
+    paint();
+  }
   function paint() {
     if (!demo && !E.who()) return loginView(S.notice || 'Your sign-in ended. Log in again to carry on.');
     const m = S.ready ? build() : null;
     const y = window.scrollY;
+    if (S.view === 'wh' && window.Wh) {
+      root.replaceChildren(demo ? h('p', { class: 'banner' }, 'Sample data. ', h('a', { href: './' }, 'Leave sample data')) : '', topView(m), window.Wh.view(paint));
+      return window.scrollTo(0, y);
+    }
     root.replaceChildren(
       demo ? h('p', { class: 'banner' }, 'Sample data. Routes are real, the orders and ISK are invented. ', h('a', { href: './' }, 'Leave sample data')) : '',
       topView(m),
@@ -1040,18 +1051,27 @@
 
   // ----------------------------------------------------------------- boot
   async function boot() {
-    window.addEventListener('hashchange', () => location.reload());
+    window.addEventListener('hashchange', () => {
+      if ((location.hash === '#demo') !== demo) return location.reload();
+      S.view = location.hash === '#wormholes' ? 'wh' : 'trade';
+      paint();
+    });
     if (demo) S.who = window.Demo.who;
     else {
-      try { await E.finishLogin(); } catch (err) { S.notice = err.message; }
+      try { if ((await E.finishLogin()) === 'scout') { S.view = 'wh'; history.replaceState(null, '', '#wormholes'); } } catch (err) { S.notice = err.message; }
       S.who = E.who();
       if (!S.who) return loginView(S.notice);
     }
+    const scout = () => (window.Wh && window.Wh.signedIn() ? window.Wh.tick().then(moved => { if (moved && S.view === 'wh') paint(); }, () => {}) : null);
+    if (S.view === 'wh') paint();
+    scout();
     await run();
     let n = 0;
     setInterval(async () => {
       stamp();
-      if (document.hidden || S.running) return;
+      if (document.hidden) return;
+      scout();
+      if (S.running) return;
       if (!demo && !E.who()) return paint();
       n++;
       if (n % 20 === 0) checkVersion();          // every five minutes

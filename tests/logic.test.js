@@ -245,3 +245,13 @@ test('colony forecast: product accumulates at a believable pace and nothing goes
   // the full command center cannot take more raw material
   assert.ok(snaps[1].get('cc').get(2288) <= 100000);
 });
+
+test('probe scanner paste', () => {
+  const text = 'ABC-123\tCosmic Signature\tWormhole\tUnstable Wormhole\t100.0%\t5.12 AU\nXYZ-042\tCosmic Signature\t\t\t0.0%\t11.4 AU\r\nQRS-777\tCosmic Anomaly\tOre Site\tOrdinary Perimeter Deposit\t100.0%\t3.02 AU\nnot a row\n';
+  const s = L.parseSigs(text);
+  assert.equal(s.length, 3);
+  assert.deepEqual(s[0], { id: 'ABC-123', scan: 'Cosmic Signature', group: 'Wormhole', name: 'Unstable Wormhole', signal: '100.0%', dist: '5.12 AU' });
+  assert.equal(s[1].group, '');
+  assert.equal(s[2].scan, 'Cosmic Anomaly');
+  assert.deepEqual(L.parseSigs(''), []);
+});

@@ -51,7 +51,7 @@ button { font: inherit; color: inherit; }
 /* ------------------------------------------------------------ top bar */
 .top {
   position: sticky; top: 0; z-index: 5; background: var(--void);
-  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.4rem 2.2rem; align-items: center;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 0.4rem 2.2rem; align-items: center;
   padding: 0.65rem var(--gap); border-bottom: 1px solid var(--seam);
 }
 .who h1 { font-size: 1.3rem; font-weight: 600; line-height: 1.15; }
@@ -274,8 +274,46 @@ button { font: inherit; color: inherit; }
 @media (max-width: 46rem) {
   :root { --gap: 0.85rem; }
   .top { grid-template-columns: minmax(0, 1fr) auto; }
+  .views { grid-column: 1 / -1; grid-row: 3; }
   .purse { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; gap: 1rem; }
   .sync p { display: none; }
   .route { grid-template-columns: minmax(0, 1fr); }
   .hot { grid-column: 1; }
 }
+
+/* ---------------------------------------------------------- wormholes */
+.views { display: flex; gap: 0.3rem; }
+.view { background: none; border: 1px solid var(--seam); border-radius: 3px; color: var(--dim); padding: 0.25rem 0.8rem; font-weight: 500; cursor: pointer; }
+.view:hover { color: var(--ink); }
+.view.is-on { color: var(--ink); border-color: var(--ink); }
+.wh-head { padding: 0.9rem var(--gap) 0.7rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 1rem; border-bottom: 1px solid var(--seam); }
+.wh-head h2 { font-size: 1.5rem; font-weight: 600; }
+.wh-head p { color: var(--dim); }
+.wh-head .tools { margin: 0 0 0 auto; }
+.wh-block { padding: 0.9rem var(--gap) 1.1rem; border-bottom: 1px solid var(--seam); }
+.wh-block h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.6rem; }
+.wh-chain { max-width: 100%; height: auto; display: block; }
+.wh-link { stroke: var(--dim); stroke-width: 2; }
+.wh-node { cursor: pointer; outline: none; }
+.wh-node rect:first-of-type { fill: var(--hull); stroke: var(--seam); }
+.wh-node.is-here rect:first-of-type { stroke: var(--lead); stroke-width: 2; }
+.wh-node.is-sel rect:first-of-type { fill: #1b3945; }
+.wh-node:focus-visible rect:first-of-type { stroke: var(--isk); stroke-width: 2; }
+.wh-name { fill: var(--ink); font-size: 15px; font-weight: 600; }
+.wh-sub { fill: var(--dim); font-size: 12px; }
+.wh-map { display: grid; gap: 0.4rem; }
+.wh-system { width: min(100%, 30rem); height: auto; }
+.wh-orbit { fill: none; stroke: var(--seam); }
+.wh-belt { fill: none; stroke: var(--seam); stroke-dasharray: 2 5; }
+.wh-sun { fill: var(--isk); }
+.wh-planet circle { fill: var(--calm); }
+.wh-planet text, .wh-sig text { fill: var(--dim); font-size: 10px; }
+.wh-structure { fill: var(--ink); }
+.wh-system [tabindex] { outline: none; cursor: default; }
+.wh-system [tabindex]:hover, .wh-system [tabindex]:focus { filter: brightness(1.6); }
+.wh-readout { min-height: 1.4rem; font-weight: 500; }
+.wh-killsum { font-weight: 500; }
+.wh-counts { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin-bottom: 0.6rem; }
+.wh-counts i { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; margin-right: 0.35rem; }
+.wh-paste { width: 100%; background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; padding: 0.4rem; font: inherit; font-size: 0.9rem; resize: vertical; }
+.sub-line { display: block; }
