@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dashboard's palette (css/app.css). -->
+<resources>
+    <color name="space">#0B171D</color>
+    <color name="hull">#10222B</color>
+    <color name="seam">#24414D</color>
+    <color name="ink">#DCE7E9</color>
+    <color name="dim">#88A2AB</color>
+    <color name="isk">#F2B94B</color>
+    <color name="lead">#62D2AA</color>
+    <color name="warn">#F3945C</color>
+    <color name="bad">#F06A6A</color>
+    <color name="calm">#7FB2C9</color>
+</resources>

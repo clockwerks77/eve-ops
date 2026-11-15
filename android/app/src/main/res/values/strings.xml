@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Eve Ops</string>
+    <string name="refresh">Refresh</string>
+    <string name="widget_trading">Eve Ops: Trading</string>
+    <string name="widget_pi">Eve Ops: Planetary Interaction</string>
+    <string name="widget_wormhole">Eve Ops: Wormholes</string>
+    <string name="widget_trading_about">Overall wealth, orders that need a change at each hub, and the week\'s net.</string>
+    <string name="widget_pi_about">What is waiting on the planets, whether a pickup is worth it, and when extractors stop.</string>
+    <string name="widget_wormhole_about">Where the wormhole pilot is, the system\'s class, effect and statics, recent kills, and loot to hand over.</string>
+    <string name="offline_title">Eve Ops cannot reach its page</string>
+    <string name="offline_body">Check the connection, then try again.</string>
+    <string name="offline_retry">Try again</string>
+    <string name="no_browser">No browser was found to open the EVE sign-in.</string>
+    <string name="signed_in">Signed in. Loading.</string>
+</resources>

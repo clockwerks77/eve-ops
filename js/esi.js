@@ -1,5 +1,7 @@
 /* Eve Ops — EVE sign-in (OAuth 2 with PKCE, no secret) and the ESI request layer.
-   The refresh token is kept in this browser's localStorage and sent only to login.eveonline.com. */
+   The refresh token is kept in this browser's localStorage and sent only to login.eveonline.com.
+   Inside the Eve Ops Android app the app keeps the sign-in instead (its widgets use it too) and
+   this page asks the app for access tokens. */
 (function () {
   'use strict';
   const C = window.EVEOPS_CONFIG;
@@ -15,6 +17,40 @@
 
   class EsiError extends Error {
     constructor(status, message) { super(message); this.status = status; }
+  }
+
+  // ------------------------------------------------- the Android app, if any
+  // The app puts an EveOpsNative object on this page only: postMessage(text) out, onmessage in.
+  const N = window.EveOpsNative || null;
+  const calls = new Map();
+  let callId = 0;
+  if (N) N.onmessage = e => {
+    let m;
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    const done = calls.get(m.rpc);
+    if (done) { calls.delete(m.rpc); done(m); }
+  };
+  function tell(op, args) {
+    if (!N) return;
+    try { N.postMessage(JSON.stringify(Object.assign({ op }, args))); } catch (err) { /* the app has gone away */ }
+  }
+  function ask(op, args) {
+    return new Promise((resolve, reject) => {
+      const rpc = ++callId;                                   // answers carry the same number back
+      calls.set(rpc, resolve);
+      tell(op, Object.assign({ rpc }, args));
+      setTimeout(() => { if (calls.delete(rpc)) reject(new EsiError(0, 'The app did not answer.')); }, 30000);
+    });
+  }
+  /** In the app: learn who is signed in there, so who() can answer straight away. */
+  async function init() {
+    if (!N) return;
+    const r = await ask('who');
+    for (const slot of ['', 'scout']) {
+      const w = r.slots && r.slots[slot], have = store.get(key(slot));
+      if (!w) store.del(key(slot));
+      else if (!have || !have.app || have.id !== w.id) store.set(key(slot), { app: true, access: null, exp: 0, id: w.id, name: w.name, scopes: w.scopes || [] });
+    }
   }
 
   // ------------------------------------------------------------- sign-in
@@ -33,6 +69,7 @@
   const form = params => Object.entries(params).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
 
   async function login(slot) {
+    if (N) return tell('login', { slot: slot || '' });      // the app opens EVE's sign-in in the phone's browser
     const verifier = randomString(32), state = randomString(16);
     const challenge = b64url(await sha256(verifier));
     if (!store.set(PKCE, { verifier, state, slot: slot || '' })) throw new EsiError(0, 'This browser is blocking storage, so the sign-in cannot be kept.');
@@ -69,6 +106,8 @@
     const code = q.get('code'), state = q.get('state'), denied = q.get('error');
     if (!code && !denied) return false;
     history.replaceState(null, '', location.pathname); // take the one-time code out of the address bar
+    // A sign-in started by the Android app comes back to this page in the phone's browser: pass the code on to the app.
+    if (state && state.indexOf('app.') === 0) return { handoff: 'eveops://auth?' + form(denied ? { error: denied, state } : { code, state }) };
     const p = store.get(PKCE);
     store.del(PKCE);
     if (denied) throw new EsiError(0, 'EVE did not complete the sign-in (' + denied + ').');
@@ -81,7 +120,21 @@
   async function token(force, slot) {
     const a = store.get(key(slot));
     if (!a) throw new EsiError(401, 'Signed out.');
-    if (!force && a.exp > Date.now()) return a.access;
+    if (!force && a.access && a.exp > Date.now()) return a.access;
+    if (N) {
+      if (!refreshing.has(slot || '')) {
+        refreshing.set(slot || '', ask('token', { slot: slot || '', force: !!force }).then(r => {
+          if (!r.ok) {
+            if (r.gone) store.del(key(slot));                 // EVE no longer accepts this sign-in
+            throw new EsiError(r.gone ? 401 : 0, r.error || 'The app could not renew the sign-in.');
+          }
+          const auth = { app: true, access: r.access, exp: r.exp, id: r.id, name: r.name, scopes: r.scopes || [] };
+          store.set(key(slot), auth);
+          return auth;
+        }).finally(() => { refreshing.delete(slot || ''); }));
+      }
+      return (await refreshing.get(slot || '')).access;
+    }
     if (!refreshing.has(slot || '')) {
       refreshing.set(slot || '', tokenRequest({ grant_type: 'refresh_token', refresh_token: a.refresh, client_id: C.clientId })
         .then(json => saveToken(json, slot), err => {
@@ -94,7 +147,7 @@
   }
 
   function who(slot) { const a = store.get(key(slot)); return a ? { id: a.id, name: a.name, scopes: a.scopes || [] } : null; }
-  function signOut(slot) { store.del(key(slot)); }
+  function signOut(slot) { tell('signout', { slot: slot || '' }); store.del(key(slot)); }
 
   // ------------------------------------------------------------ requests
   const cache = new Map(), flying = new Map(), waiting = [];
@@ -181,5 +234,5 @@
     return res.json();
   }
 
-  window.Esi = { login, finishLogin, who, signOut, get, post, store, EsiError, get paused() { return Math.max(0, pausedUntil - Date.now()); } };
+  window.Esi = { login, finishLogin, init, who, signOut, get, post, store, EsiError, native: !!N, tell, get paused() { return Math.max(0, pausedUntil - Date.now()); } };
 })();

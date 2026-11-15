@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.EveOps" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/space</item>
+        <item name="android:statusBarColor">@color/space</item>
+        <item name="android:navigationBarColor">@color/space</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">@color/isk</item>
+    </style>
+
+    <!-- Widget text. Launchers will not load an app's own font files, so this uses the system's condensed face. -->
+    <style name="W">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:fontFamily">sans-serif-condensed</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textColor">@color/ink</item>
+    </style>
+    <style name="W.Title">
+        <item name="android:fontFamily">sans-serif-condensed-medium</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+    <style name="W.Dim">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/dim</item>
+    </style>
+    <style name="W.Big">
+        <item name="android:fontFamily">sans-serif-condensed-medium</item>
+        <item name="android:textSize">28sp</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+    <style name="W.Line">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+</resources>

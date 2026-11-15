@@ -801,11 +801,10 @@
     return img;
   }
   function copy(btn, price) {
+    const done = () => { btn.classList.add('is-copied'); setTimeout(() => btn.classList.remove('is-copied'), 1400); };
+    if (E.native) { E.tell('copy', { text: String(price) }); return done(); }     // in the Android app, the app fills the clipboard
     if (!navigator.clipboard) return;
-    navigator.clipboard.writeText(String(price)).then(() => {
-      btn.classList.add('is-copied');
-      setTimeout(() => btn.classList.remove('is-copied'), 1400);
-    }, () => {});
+    navigator.clipboard.writeText(String(price)).then(done, () => {});
   }
   function C_(cls, label) { const el = h('div', { class: 'c ' + cls, 'data-label': label }); for (let i = 2; i < arguments.length; i++) add(el, arguments[i]); return el; }
 
@@ -1206,6 +1205,7 @@
   function paint() {
     if (!demo && !E.who()) return loginView(S.notice || 'Your sign-in ended. Log in again to carry on.');
     const m = S.ready ? build() : null;
+    share(m);
     const y = window.scrollY;
     if (S.view === 'wh' && window.Wh) {
       root.replaceChildren(demo ? h('p', { class: 'banner' }, 'Sample data. ', h('a', { href: './' }, 'Leave sample data')) : '', topView(m), window.Wh.view(paint, m ? lootView(m) : null));
@@ -1221,6 +1221,51 @@
     window.scrollTo(0, y);
   }
 
+  /**
+   * What the Android app's home-screen widgets show: a short summary of the board, handed to the app
+   * a moment after each repaint. Times are absolute so the widgets stay right between refreshes.
+   */
+  function widgetData(m) {
+    const rows = s => s.sells.concat(s.bids);
+    const hubs = m.stops.map(s => ({ name: s.short, change: s.change, optional: s.optional, check: s.check, orders: rows(s).length, here: !!s.docked, jumps: s.jumps,
+      hold: rows(s).filter(r => r.plan.action === 'hold' && !(r.pos && r.pos.status === 'leading')).length }));
+    const sys = S.loc && K.systems[S.loc.solar_system_id], docked = S.loc && (S.loc.station_id || S.loc.structure_id);
+    const sc = m.scout, sell = sc && sc.sell && sc.sell.ready && sc.loot.length ? sc.sell : null;
+    return {
+      v: 1, at: m.now, pilot: S.who.name, sample: demo,
+      where: !S.loc ? '' : (docked ? 'Docked in ' : 'In space in ') + (sys ? sys.name : 'an unknown system'), ship: S.ship ? nameOf(S.ship.ship_type_id) : '',
+      wealth: m.both != null ? m.both : m.wealth, both: m.both != null, wallet: m.wallet, escrow: m.escrow, listed: m.listed, week: m.week.net, today: m.today.net,
+      orders: { sells: sum(m.stops, s => s.sells.length), bids: m.bidCount, change: sum(hubs, x => x.change), optional: sum(hubs, x => x.optional), check: sum(hubs, x => x.check), hold: sum(hubs, x => x.hold),
+        used: m.slots ? m.slots.used : null, max: m.slots ? m.slots.max : null },
+      hubs, booksAt: (S.feeds['Market books'] || {}).at || 0,
+      pi: m.pi ? { go: m.pi.go, value: m.pi.value, perDay: m.pi.perDay, units: Math.round(m.pi.units), m3: Math.round(m.pi.m3), full: m.pi.full, reach: m.pi.reach, worth: C.pi.worth, system: m.pi.system, stopped: m.pi.stopped,
+        near: m.pi.near && isFinite(m.pi.near.jumps) ? m.pi.near.name : '', nearJumps: m.pi.near && isFinite(m.pi.near.jumps) ? m.pi.near.jumps : null, from: m.pi.from } : null,
+      planets: m.planets.map(p => ({ name: p.name, expiry: p.expiry, product: p.product ? nameOf(p.product) : '', units: p.units ? Math.round(p.units[0]) : null, fill: p.fill || 0 })),
+      skill: m.queue[0] || null, skillEnd: m.queue.length ? m.queue[m.queue.length - 1].done : null, paused: m.paused.length > 0,
+      scout: sc ? { name: sc.name, wealth: sc.wealth, wallet: sc.wallet, skill: sc.queue[0] || null,
+        loot: sc.loot ? { places: sc.loot.length, value: sum(sc.loot, p => p.value), m3: Math.round(sum(sc.loot, p => p.m3)),
+          list: sell ? sell.split.list : null, now: sell ? sell.split.now : null, hub: sell ? sell.hubs.reduce((a, b) => (b.list > a.list ? b : a)).name : '' } : null } : null,
+      wh: window.Wh && window.Wh.summary ? window.Wh.summary() : null,
+      problems: Object.keys(S.feeds).filter(n => S.feeds[n].err).length,
+    };
+  }
+  let shareTimer = 0;
+  function share(m) {
+    if (!E.native || !m) return;
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(() => { try { E.tell('snapshot', { settled: !S.running, data: widgetData(m) }); } catch (err) { /* the next repaint tries again */ } }, 1200);
+  }
+
+  /** The phone's browser after an EVE sign-in that the Android app started: send the one-time code on to the app. */
+  function handoffView(url) {
+    root.replaceChildren(h('main', { class: 'door' },
+      h('h1', null, 'Eve Ops'),
+      h('p', { class: 'lede' }, 'EVE has approved the sign-in. Go back to the app to finish.'),
+      h('a', { class: 'btn btn-big', href: url }, 'Return to the Eve Ops app'),
+      h('p', { class: 'small' }, 'If nothing happens, the Eve Ops app is not installed on this device. You can close this tab.')));
+    setTimeout(() => { location.href = url; }, 250);      // most browsers hand over without the tap
+  }
+
   function loginView(notice) {
     const ready = !!C.clientId;
     root.replaceChildren(h('main', { class: 'door' },
@@ -1228,9 +1273,9 @@
       h('p', { class: 'lede' }, 'Your open orders against the live book, the exact price to type at each hub, and the route between them.'),
       notice && h('p', { class: 'door-note' }, notice),
       ready
-        ? h('button', { type: 'button', class: 'btn btn-big', onclick: e => { e.currentTarget.disabled = true; E.login().catch(err => loginView(err.message)); } }, 'Log in with EVE')
+        ? h('button', { type: 'button', class: 'btn btn-big', onclick: e => { if (!E.native) e.currentTarget.disabled = true; Promise.resolve(E.login()).catch(err => loginView(err.message)); } }, 'Log in with EVE')
         : h('p', { class: 'door-note' }, 'Sign-in is not switched on yet: the EVE application’s Client ID still has to be added to this page.'),
-      h('p', { class: 'small' }, 'Log in with the character that holds your market orders. Access is read-only, and the sign-in is kept in this browser only.'),
+      h('p', { class: 'small' }, 'Log in with the character that holds your market orders. Access is read-only, and the sign-in is kept ' + (E.native ? 'in this app only.' : 'in this browser only.')),
       h('p', { class: 'small' }, h('a', { href: '#demo' }, 'Look around with sample data'))));
   }
 
@@ -1267,7 +1312,11 @@
     });
     if (demo) S.who = window.Demo.who;
     else {
-      try { if ((await E.finishLogin()) === 'scout') { S.view = 'wh'; history.replaceState(null, '', '#wormholes'); } } catch (err) { S.notice = err.message; }
+      let done = false;
+      try { done = await E.finishLogin(); } catch (err) { S.notice = err.message; }
+      if (done && done.handoff) return handoffView(done.handoff);
+      if (done === 'scout') { S.view = 'wh'; history.replaceState(null, '', '#wormholes'); }
+      try { await E.init(); } catch (err) { S.notice = err.message; }
       S.who = E.who();
       if (!S.who) return loginView(S.notice);
     }

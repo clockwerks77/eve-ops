@@ -1,27 +1,105 @@
 name: Android app
 
+# Every push that touches the app is compiled and tested.
+# Pushing a tag named android-<n> also publishes the APK as a release.
 on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ['android-*']
     paths: ['android/**', '.github/workflows/android.yml']
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  probe:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EVEOPS_BUILD: ${{ github.run_number }}
     steps:
-      - name: What this runner has
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+
+      # The signing key is a repository secret (SIGNING_KEY: a PKCS12 keystore, base64, alias and password "eveops").
+      # Without it the build is signed with a throwaway key: it installs, but not over a build signed with another key.
+      - name: Signing key
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         run: |
+          key="$RUNNER_TEMP/eveops.p12"
+          if [ -n "$SIGNING_KEY" ]; then
+            printf '%s' "$SIGNING_KEY" | tr -d ' \r\n' | base64 -d > "$key"
+            if ! keytool -list -keystore "$key" -storetype PKCS12 -storepass eveops -alias eveops > /dev/null 2>&1; then
+              echo "::error title=signing key::The SIGNING_KEY secret is not a keystore this build can read. Paste the whole value again."
+              exit 1
+            fi
+            echo "EVEOPS_SIGNING=lasting" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -keystore "$key" -storetype PKCS12 -storepass eveops -keypass eveops -alias eveops \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Eve Ops temporary build key" > /dev/null 2>&1
+            echo "EVEOPS_SIGNING=temporary" >> "$GITHUB_ENV"
+          fi
+          echo "EVEOPS_KEYSTORE=$key" >> "$GITHUB_ENV"
+
+      - name: Test and build
+        working-directory: android
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain testReleaseUnitTest assembleRelease 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Say what failed
+        if: failure()
+        run: |
+          log="$RUNNER_TEMP/build.log"
+          [ -f "$log" ] || exit 0
           {
-            echo "java: $(java -version 2>&1 | head -1)"
-            echo "ANDROID_HOME=$ANDROID_HOME"
-            ls "$ANDROID_HOME/platforms" | tr '\n' ' '; echo
-            ls "$ANDROID_HOME/build-tools" | tr '\n' ' '; echo
-            gradle --version 2>/dev/null | grep -E '^Gradle' || echo "no gradle on PATH"
-            ls /dev/kvm 2>&1
-          } > probe.txt 2>&1
-          msg=$(sed 's/%/%25/g' probe.txt | sed ':a;N;$!ba;s/\n/%0A/g')
-          echo "::notice title=probe::$msg"
+            grep -nE "^e: |error:|FAILED|What went wrong|^> |Caused by|AssertionError|ComparisonFailure|expected:<|Could not|Unresolved|Execution failed" "$log" | head -70
+            echo "--- last lines"
+            tail -25 "$log"
+          } | cut -c1-500 > "$RUNNER_TEMP/errors.txt"
+          msg=$(sed 's/%/%25/g' "$RUNNER_TEMP/errors.txt" | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=android build::$msg"
+
+      - name: Check the APK
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          cert=$("$tools/apksigner" verify --print-certs "$apk" | grep -m1 "SHA-256" | sed 's/.*digest: //')
+          size=$(du -h "$apk" | cut -f1)
+          echo "::notice title=apk::build 1.0.$EVEOPS_BUILD, $size, $EVEOPS_SIGNING key, certificate $cert"
+
+      - name: Publish the APK
+        if: startsWith(github.ref, 'refs/tags/android-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="1.0.$EVEOPS_BUILD"
+          apk="eve-ops-$v.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          {
+            echo "Eve Ops for Android, build $v: the dashboard as an app, with three home-screen widgets (Trading, Planetary Interaction, Wormholes)."
+            echo
+            echo "**To install:** open this page on the phone, tap \`$apk\` under Assets, then open the downloaded file. Android asks once to allow installs from your browser. Needs Android 12 or newer."
+            echo
+            if [ "$EVEOPS_SIGNING" = "lasting" ]; then
+              echo "Signed with this repository's own key: it installs over earlier builds signed the same way and keeps the sign-in."
+            else
+              echo "Signed with a temporary key, because no SIGNING_KEY secret is set on the repository yet. It works, but a later build will not install over it: Android will ask for this one to be uninstalled first."
+            fi
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" "$apk" --title "Eve Ops for Android $v" --notes-file notes.md
+          echo "::notice title=published::$apk"

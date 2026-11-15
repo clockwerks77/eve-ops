@@ -230,7 +230,7 @@
     if (!me) {
       return h('main', { class: 'door' }, h('h1', null, 'Wormholes'),
         h('p', { class: 'lede' }, 'Sign in the character that flies the holes. The page follows where they are and builds the chain from their jumps.'),
-        h('button', { type: 'button', class: 'btn btn-big', onclick: e => { e.currentTarget.disabled = true; E.login('scout'); } }, 'Log in the wormhole pilot'),
+        h('button', { type: 'button', class: 'btn btn-big', onclick: e => { if (!E.native) e.currentTarget.disabled = true; E.login('scout'); } }, 'Log in the wormhole pilot'),
         h('p', { class: 'small' }, 'This is a second sign-in beside the trading character. Read-only, kept in this browser.'));
     }
     const here = S.loc && S.loc.solar_system_id, cur = W.systems[here], id = S.sel && W.systems[S.sel] ? S.sel : here, s = W.systems[id];
@@ -300,5 +300,21 @@
       { at: t - 70 * 36e5, ship: 'Drake', victim: 'Sample Ratters', by: 'NPCs', pilots: 3, value: 96e6, npc: true }] });
   }
 
-  window.Wh = { view, tick, signedIn: () => !!who() };
+  /** A few lines about where the pilot is now, for the Android app's widget. */
+  function summary() {
+    const me = who();
+    if (!me || !S.loc) return null;
+    const id = S.loc.solar_system_id, s = W.systems[id];
+    if (!s) return null;
+    const k = S.kills.get(id), docked = S.loc.structure_id || S.loc.station_id;
+    return {
+      pilot: me.name, system: s.name, cls: s.cls || '', effect: effect(id) || '', statics: statics(id).map(staticText),
+      docked: !!docked, place: S.loc.structure_id && s.structures && s.structures[S.loc.structure_id] ? s.structures[S.loc.structure_id].name : '',
+      ship: S.ship ? W.names[S.ship.ship_type_id] || '' : '', shipName: S.ship ? L.shipName(S.ship.ship_name) : '',
+      kills: k && k.list ? { week: k.total, day: k.list.filter(x => Date.now() - x.at < 864e5).length, last: k.list.length ? k.list[0].at : 0 } : null,
+      sigs: (s.sigs || []).length, links: W.links.length, at: demo ? Date.now() : W.lastAt,
+    };
+  }
+
+  window.Wh = { view, tick, summary, signedIn: () => !!who() };
 })();

@@ -1,0 +1,184 @@
+{
+ "v": 1,
+ "at": 1794734925863,
+ "pilot": "Sample Trader",
+ "sample": true,
+ "where": "Docked in Hek",
+ "ship": "Prorator",
+ "wealth": 9077847467.57,
+ "both": true,
+ "wallet": 6072843112.37,
+ "escrow": 271342000,
+ "listed": 681631900,
+ "week": 76868469.75,
+ "today": 1441142.874999999,
+ "orders": {
+  "sells": 16,
+  "bids": 4,
+  "change": 10,
+  "optional": 2,
+  "check": 1,
+  "hold": 2,
+  "used": 20,
+  "max": 145
+ },
+ "hubs": [
+  {
+   "name": "Hek",
+   "change": 2,
+   "optional": 2,
+   "check": 0,
+   "orders": 7,
+   "here": true,
+   "jumps": 0,
+   "hold": 1
+  },
+  {
+   "name": "Rens",
+   "change": 1,
+   "optional": 0,
+   "check": 0,
+   "orders": 1,
+   "here": false,
+   "jumps": 6,
+   "hold": 0
+  },
+  {
+   "name": "Dodixie",
+   "change": 3,
+   "optional": 0,
+   "check": 0,
+   "orders": 5,
+   "here": false,
+   "jumps": 8,
+   "hold": 1
+  },
+  {
+   "name": "Jita",
+   "change": 3,
+   "optional": 0,
+   "check": 1,
+   "orders": 4,
+   "here": false,
+   "jumps": 9,
+   "hold": 0
+  },
+  {
+   "name": "Amarr",
+   "change": 1,
+   "optional": 0,
+   "check": 0,
+   "orders": 3,
+   "here": false,
+   "jumps": 15,
+   "hold": 0
+  }
+ ],
+ "booksAt": 1794734781640,
+ "pi": {
+  "go": "worth",
+  "value": 66886500,
+  "perDay": 2196000,
+  "units": 7310,
+  "m3": 5483,
+  "full": 0.1095,
+  "reach": 0,
+  "worth": 50000000,
+  "system": "Eystur",
+  "stopped": 1,
+  "near": "Hek",
+  "nearJumps": 1,
+  "from": 1
+ },
+ "planets": [
+  {
+   "name": "Alakgur III",
+   "expiry": 1794727725640,
+   "product": "Biocells",
+   "units": 1170,
+   "fill": 0.08775
+  },
+  {
+   "name": "Alakgur I",
+   "expiry": 1794958125640,
+   "product": "Biocells",
+   "units": 975,
+   "fill": 0.073125
+  },
+  {
+   "name": "Alakgur II",
+   "expiry": 1794958125640,
+   "product": "Biocells",
+   "units": 1065,
+   "fill": 0.079875
+  },
+  {
+   "name": "Alakgur IV",
+   "expiry": 1794958125640,
+   "product": "Biocells",
+   "units": 1270,
+   "fill": 0.09525
+  },
+  {
+   "name": "Alakgur V",
+   "expiry": 1794958125640,
+   "product": "Biocells",
+   "units": 1370,
+   "fill": 0.10275
+  },
+  {
+   "name": "Alakgur VI",
+   "expiry": 1794958125640,
+   "product": "Biocells",
+   "units": 1460,
+   "fill": 0.1095
+  }
+ ],
+ "skill": {
+  "name": "Tycoon",
+  "level": 1,
+  "done": 1795008525640
+ },
+ "skillEnd": 1795685325640,
+ "paused": false,
+ "scout": {
+  "name": "Sample Scout",
+  "wealth": 1736670455.2,
+  "wallet": 1284310455.2,
+  "skill": {
+   "name": "Archaeology",
+   "level": 5,
+   "done": 1795260525640
+  },
+  "loot": {
+   "places": 3,
+   "value": 134360000,
+   "m3": 5105,
+   "list": 139978340,
+   "now": 125629892.5,
+   "hub": "Hek"
+  }
+ },
+ "wh": {
+  "pilot": "Sample Scout",
+  "system": "J111613",
+  "cls": "C3",
+  "effect": "Cataclysmic Variable",
+  "statics": [
+   "E175 to C4, 16 h"
+  ],
+  "docked": true,
+  "place": "J111613 - Sample Fortizar",
+  "ship": "Stratios",
+  "shipName": "Deep Dive",
+  "kills": {
+   "week": 3,
+   "day": 1,
+   "last": 1794724125667
+  },
+  "sigs": 6,
+  "links": 2,
+  "at": 1794734927068
+ },
+ "problems": 0
+}
