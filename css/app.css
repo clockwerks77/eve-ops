@@ -41,6 +41,7 @@ button { font: inherit; color: inherit; }
 .btn:hover { border-color: var(--dim); }
 .btn:disabled { color: var(--dim); cursor: default; }
 .btn-quiet { color: var(--dim); }
+.btn-update { border-color: var(--lead); color: var(--lead); white-space: nowrap; }
 .btn[aria-pressed="true"] { color: var(--lead); border-color: var(--lead); }
 .btn-big { font-size: 1.25rem; font-weight: 600; padding: 0.6rem 1.4rem; border-color: var(--isk); color: var(--isk); }
 .btn-big:hover { background: var(--isk); color: var(--void); border-color: var(--isk); }

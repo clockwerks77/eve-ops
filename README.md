@@ -47,6 +47,10 @@ Your own orders are matched by ID inside the market book, so a price change show
 
 `js/config.js` holds the fees (broker 1.5%, sales tax 3.375%, 0.39% per price change), the sniper and big-move thresholds, the slow-line threshold, and the item types left out of trading math.
 
+## Deploying
+
+Push to `main`. Bump the version number in `index.html` (the `eveops-version` meta tag and every `?v=`) in the same commit: browsers cache the files for ten minutes otherwise, and an open board checks that number every five minutes and offers a reload when it changes.
+
 ## Files
 
 - `index.html`, `css/app.css` — the page and its three layouts (monitor, tablet, phone)

@@ -6,6 +6,7 @@
   const demo = !!(window.Demo && window.Demo.on);
   const NET = 1 - C.fees.broker - C.fees.salesTax;
   const M = 6e4, H = 36e5, D = 864e5;
+  const VERSION = (document.querySelector('meta[name="eveops-version"]') || {}).content || '';
   const SKILL = { trade: 3443, retail: 3444, wholesale: 16596, tycoon: 18580, infomorph: 33399 };
   const sum = (arr, f) => arr.reduce((s, x) => s + f(x), 0);
   const num = n => Number(n).toLocaleString('en-US');
@@ -675,6 +676,7 @@
         h('div', null, h('dt', null, 'In buy orders'), h('dd', null, L.short(m.escrow))),
         h('div', null, h('dt', null, 'Net since Monday'), h('dd', null, L.short(m.week.net)))),
       h('div', { class: 'sync' },
+        S.update && h('button', { type: 'button', class: 'btn btn-update', onclick: () => location.reload() }, 'Update ready, reload'),
         h('p', null, f && f.at ? ['Market books ', live('age', f.at), h('span', { class: 'sub' }, live('next', f.next))] : S.running ? 'Loading' : ''),
         h('button', { type: 'button', class: 'btn', disabled: S.running, onclick: run }, S.running ? 'Loading' : 'Refresh')));
   }
@@ -704,6 +706,15 @@
         : h('p', { class: 'door-note' }, 'Sign-in is not switched on yet: the EVE application’s Client ID still has to be added to this page.'),
       h('p', { class: 'small' }, 'Log in with the character that holds your market orders. Access is read-only, and the sign-in is kept in this browser only.'),
       h('p', { class: 'small' }, h('a', { href: '#demo' }, 'Look around with sample data'))));
+  }
+
+  /** A board left open for days should notice when a newer version has been published. */
+  async function checkVersion() {
+    try {
+      const html = await (await fetch('./', { cache: 'no-store' })).text();
+      const m = html.match(/name="eveops-version" content="([^"]+)"/);
+      if (m && VERSION && m[1] !== VERSION && !S.update) { S.update = true; paint(); }
+    } catch (err) { /* offline: try again later */ }
   }
 
   async function toggleWake() {
@@ -737,6 +748,7 @@
       if (document.hidden || S.running) return;
       if (!demo && !E.who()) return paint();
       n++;
+      if (n % 20 === 0) checkVersion();          // every five minutes
       if (n % 4 === 0) return run();           // once a minute: fetch whatever EVE has republished
       try { if (await loadLocation()) { await loadRoutes(); paint(); } } catch (err) { /* next tick */ }
     }, 15000);
