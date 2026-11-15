@@ -262,3 +262,64 @@ test('ship names with symbols come through as typed', () => {
   assert.equal(L.shipName("u'It\\'s fine'"), "It's fine");
   assert.equal(L.shipName(undefined), '');
 });
+
+test('where a pile of loot sells: lowest ask, bids that reach the hub, and the best hub for each', () => {
+  const hubs = [{ name: 'Hek', station: 1, system: 10 }, { name: 'Jita', station: 2, system: 20 }, { name: 'Amarr', station: 3, system: 30 }];
+  const sell = (loc, price) => ({ is_buy_order: false, location_id: loc, price, volume_remain: 50, range: 'region' });
+  const buy = (loc, sys, price, units, range, min) => ({ is_buy_order: true, location_id: loc, system_id: sys, price, volume_remain: units, range: range || 'station', min_volume: min || 1 });
+  const books = {
+    Hek: [sell(1, 1300), sell(1, 1250), sell(99, 900), buy(1, 10, 1000, 4), buy(98, 10, 1100, 3, 'solarsystem'), buy(97, 11, 1200, 50, 'station'), buy(96, 12, 950, 100, 'region')],
+    Jita: [sell(2, 1200), buy(2, 20, 1150, 5), buy(2, 20, 1140, 500, 'station', 50)],
+    Amarr: [sell(3, 2600)],
+  };
+  const r = L.sellAt(hubs, hb => books[hb.name], 10, { ref: 1200, refStation: 2 });
+  const [hek, jita, amarr] = r.hubs;
+  assert.equal(hek.ask, 1250);                 // the 900 ask is in another station
+  assert.equal(hek.bid, 1100);                 // the 1200 bid is station-only, somewhere else
+  assert.equal(hek.now, 3 * 1100 + 4 * 1000 + 3 * 950);
+  assert.equal(hek.filled, 10);
+  assert.equal(jita.now, 5 * 1150);            // the big bid wants 50 at a time and only 5 are left
+  assert.equal(jita.filled, 5);
+  assert.equal(amarr.thin, true);              // a lone listing at more than 1.5 times the Jita ask
+  assert.equal(jita.thin, false);
+  assert.equal(amarr.fair, 1200);              // and it is counted at the Jita ask, not its own
+  assert.equal(hek.fair, 1250);
+  assert.equal(r.list, 'Hek');
+  assert.equal(r.now, 'Hek');
+});
+
+test('where loot sells: nothing on the market, and a lone high listing when it is the only one', () => {
+  const hubs = [{ name: 'Hek', station: 1, system: 10 }, { name: 'Jita', station: 2, system: 20 }];
+  const none = L.sellAt(hubs, () => [], 5, {});
+  assert.equal(none.list, null);
+  assert.equal(none.now, null);
+  assert.equal(none.hubs[0].filled, 0);
+  const lone = L.sellAt(hubs, hb => (hb.name === 'Hek' ? [{ is_buy_order: false, location_id: 1, price: 5000, volume_remain: 1 }] : []), 5, { ref: 1000 });
+  assert.equal(lone.hubs[0].thin, true);
+  assert.equal(lone.list, 'Hek');              // still the only place it is on sale
+});
+
+test('where loot sells: a hub too slow for the pile is passed over, and the quickest is used when all are slow', () => {
+  const hubs = [{ name: 'Hek', station: 1, system: 10 }, { name: 'Rens', station: 2, system: 20 }, { name: 'Jita', station: 3, system: 30 }];
+  const ask = (loc, price) => [{ is_buy_order: false, location_id: loc, price, volume_remain: 9 }];
+  const books = { Hek: ask(1, 110), Rens: ask(2, 125), Jita: ask(3, 100) };
+  const perDay = { Hek: 400, Rens: 10, Jita: 9000 };
+  const r = L.sellAt(hubs, hb => books[hb.name], 420, { ref: 100, refStation: 3, perDay: hb => perDay[hb.name], share: 0.15, days: 14 });
+  assert.equal(Math.round(r.hubs[0].days), 7);          // 420 units at 15% of 400 a day
+  assert.equal(r.hubs[1].slow, true);                   // 280 days in Rens
+  assert.equal(r.list, 'Hek');                          // Rens asks more but would not sell
+  const slow = L.sellAt(hubs, hb => books[hb.name], 420, { perDay: hb => ({ Hek: 3, Rens: 0, Jita: 20 })[hb.name] });
+  assert.equal(slow.hubs[1].days, Infinity);
+  assert.equal(slow.list, 'Jita');                      // every hub is slow: take the quickest
+  const unknown = L.sellAt(hubs, hb => books[hb.name], 420, {});
+  assert.equal(unknown.hubs[0].slow, false);            // no history loaded: do not guess
+  assert.equal(unknown.list, 'Rens');
+});
+
+test('units traded a day counts calendar days, not days that had trades', () => {
+  const now = Date.parse('2026-11-15T12:00:00Z');
+  const hist = [{ date: '2026-11-01', volume: 999 }, { date: '2026-11-09', volume: 70 }, { date: '2026-11-13', volume: 35 }, { date: '2026-11-14', volume: 35 }];
+  assert.equal(L.tradedPerDay(hist, now, 7), 20);
+  assert.equal(L.tradedPerDay([], now, 7), 0);
+  assert.equal(L.tradedPerDay(null, now, 7), 0);
+});

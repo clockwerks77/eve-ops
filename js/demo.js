@@ -8,7 +8,7 @@
   const ST = { jita: 60003760, amarr: 60008494, dodixie: 60011866, rens: 60004588, hek: 60005686 };
   const REGION = { 60003760: 10000002, 60008494: 10000043, 60011866: 10000032, 60004588: 10000030, 60005686: 10000042 };
   const SYS = { 60003760: 30000142, 60008494: 30002187, 60011866: 30002659, 60004588: 30002510, 60005686: 30002053 };
-  const CHAR = 90000001;
+  const CHAR = 90000001, SCOUT = 90000002, FORT = 1040000000001;
 
   const names = {
     60003760: 'Jita IV - Moon 4 - Caldari Navy Assembly Plant',
@@ -24,6 +24,8 @@
     2329: 'Biocells', 9832: 'Coolant', 12733: 'Prorator',
     2288: 'Carbon Compounds', 2270: 'Noble Metals', 2396: 'Biofuels', 2399: 'Precious Metals', 2473: 'Barren Basic Industry Facility',
     2474: 'Barren Advanced Industry Facility', 2524: 'Barren Command Center', 2544: 'Barren Launchpad', 2848: 'Barren Extractor Control Unit',
+    30744: 'Neural Network Analyzer', 30745: 'Sleeper Data Library', 30746: 'Ancient Coordinates Database', 25624: 'Intact Armor Plates',
+    30259: 'Melted Nanoribbons', 30377: 'Fullerite-C320', 30378: 'Fullerite-C540', 20424: 'Datacore - Mechanical Engineering', 11188: 'Stratios', 13278: 'Archaeology',
     3443: 'Trade', 3444: 'Retail', 16596: 'Wholesale', 18580: 'Tycoon', 33399: 'Infomorph Synchronizing', 16622: 'Accounting',
   };
 
@@ -122,6 +124,33 @@
       routes: [r(1, 3, 2288, 3000, 1), r(1, 4, 2288, 3000, 2), r(1, 9, 2288, 16000, 3), r(2, 5, 2270, 3000, 4), r(2, 6, 2270, 3000, 5), r(2, 9, 2270, 6000, 6),
         r(3, 7, 2396, 20, 7), r(5, 7, 2399, 20, 8), r(4, 8, 2396, 20, 9), r(6, 8, 2399, 20, 10), r(7, 10, 2329, 5, 11), r(8, 10, 2329, 5, 12)] };
   };
+  // the wormhole pilot's loot: [type, group, m3 each, average price, { hub: [ask, bid, bid units] }]
+  const GROUPS = { 880: ['Sleeper Components', 17], 754: ['Salvaged Materials', 4], 711: ['Harvestable Cloud', 25], 333: ['Datacores', 17] };
+  const CATS = { 17: 'Commodity', 4: 'Material', 25: 'Asteroid' };
+  const loot = [
+    [30744, 880, 0.01, 200000, { jita: [203000, 200000, 9000], amarr: [205000, 200000, 9000], dodixie: [null, 200000, 9000], rens: [209000, 200000, 9000], hek: [212000, 200000, 9000] }],
+    [30745, 880, 0.01, 500000, { jita: [506000, 500000, 9000], amarr: [509000, 500000, 9000], dodixie: [512000, 500000, 9000], rens: [null, 500000, 9000], hek: [519000, 500000, 9000] }],
+    [30746, 880, 0.01, 1500000, { jita: [1519000, 1500000, 9000], amarr: [1524000, 1500000, 9000], dodixie: [null, 1500000, 9000], rens: [1540000, 1500000, 9000], hek: [1536000, 1500000, 9000] }],
+    [25624, 754, 0.01, 1690000, { jita: [1695000, 1610000, 400], amarr: [1740000, 1552000, 60], dodixie: [1790000, 1490000, 25], rens: [2890000, 1405000, 30], hek: [1820000, 1440000, 3] }],
+    [30259, 754, 0.01, 3290000, { jita: [3310000, 3204000, 800], amarr: [3390000, 3110000, 90], dodixie: [3450000, 3020000, 40], rens: [3520000, 2950000, 20], hek: [3480000, 2990000, 6] }],
+    [30377, 711, 5, 97000, { jita: [98500, 93100, 20000], amarr: [104000, 88000, 3000], dodixie: [null, 84000, 500], rens: [112000, 80500, 200], hek: [109900, 82000, 150] }],
+    [30378, 711, 10, 40500, { jita: [41200, 38900, 20000], amarr: [43900, 36000, 2000], dodixie: [45000, null, 0], rens: [null, null, 0], hek: [47800, 33500, 120] }],
+    [20424, 333, 0.1, 83000, { jita: [84900, 79500, 5000], amarr: [88800, 74000, 800], dodixie: [91200, 71000, 300], rens: [97500, 68000, 100], hek: [95800, 69500, 25] }],
+  ];
+  const lootOf = new Map(loot.map(x => [x[0], x]));
+  for (const [type, , , , mk] of loot) for (const hub of Object.keys(mk)) {
+    const loc = ST[hub], [ask, bid, units] = mk[hub];
+    if (ask) rival(REGION[loc], type, loc, false, ask, 60, 7 * H);
+    if (bid) rival(REGION[loc], type, loc, true, bid, units, 9 * H);
+  }
+  const stack = (item_id, type_id, quantity, location_id, location_flag, location_type) => ({ item_id, type_id, quantity, location_id, location_flag, location_type: location_type || 'item', is_singleton: false });
+  const scoutAssets = [
+    stack(801, 25624, 9, FORT, 'Hangar'), stack(802, 30259, 14, FORT, 'Hangar'), stack(803, 30744, 22, FORT, 'Hangar'), stack(804, 30745, 6, FORT, 'Hangar'), stack(805, 30377, 420, FORT, 'Hangar'),
+    stack(811, 20424, 40, ST.hek, 'Hangar', 'station'), stack(812, 30746, 3, ST.hek, 'Hangar', 'station'), stack(813, 30378, 300, ST.hek, 'Hangar', 'station'),
+    { item_id: 820, type_id: 11188, quantity: 1, location_id: ST.hek, location_flag: 'Hangar', location_type: 'station', is_singleton: true },
+    stack(821, 30744, 8, 820, 'Cargo'), stack(822, 25624, 2, 820, 'Cargo'),
+  ];
+
   const planets = [1, 2, 3, 4, 5, 6].map(i => ({ planet_id: 40150000 + i, planet_type: ['barren', 'gas', 'temperate', 'lava', 'oceanic', 'storm'][i - 1], solar_system_id: 30002543, last_update: iso(34 * H), num_pins: 10, owner_id: CHAR, upgrade_level: 4 }));
 
   function answer(data, ttl, age) { return Promise.resolve({ data, fetched: now, modified: now - (age || 0), expires: Date.now() + ttl }); }
@@ -129,6 +158,15 @@
   function get(path, opts) {
     const q = (opts && opts.query) || {};
     let m;
+    if (path.indexOf('/characters/' + SCOUT + '/') === 0) {
+      if (/\/wallet\/$/.test(path)) return answer(1284310455.2, 2 * M, 40e3);
+      if (/\/assets\/$/.test(path)) return answer(scoutAssets, 60 * M, 35 * M);
+      if (/\/skillqueue\/$/.test(path)) return answer([{ skill_id: 13278, finished_level: 5, queue_position: 0, start_date: iso(30 * H), finish_date: iso(-(6 * D + 2 * H)) }], 2 * M, M);
+      if (/\/orders\/$/.test(path)) return answer([], 20 * M, 9 * M);
+    }
+    if ((m = path.match(/\/universe\/structures\/(\d+)\/$/))) return answer({ name: 'J111613 - Sample Fortizar', solar_system_id: 31002318, position: { x: 0, y: 0, z: 0 } }, D);
+    if ((m = path.match(/\/universe\/groups\/(\d+)\/$/)) && GROUPS[m[1]]) return answer({ group_id: Number(m[1]), name: GROUPS[m[1]][0], category_id: GROUPS[m[1]][1] }, D);
+    if ((m = path.match(/\/universe\/categories\/(\d+)\/$/)) && CATS[m[1]]) return answer({ category_id: Number(m[1]), name: CATS[m[1]] }, D);
     if (/\/location\/$/.test(path)) return answer({ solar_system_id: 30002053, station_id: ST.hek }, 5e3);
     if (/\/ship\/$/.test(path)) return answer({ ship_item_id: 1, ship_name: 'Dawn Treader IV', ship_type_id: 12733 }, 5e3);
     if (/\/wallet\/$/.test(path)) return answer(6072843112.37, 2 * M, 40e3);
@@ -155,9 +193,14 @@
     ] }, 2 * M, M);
     if (/\/planets\/$/.test(path)) return answer(planets, 10 * M, 4 * M);
     if ((m = path.match(/\/planets\/(\d+)\/$/)) && /characters/.test(path)) return answer(colony(Number(m[1]) - 40150000), 10 * M, 4 * M);
-    if ((m = path.match(/\/universe\/types\/(\d+)\/$/))) return answer({ type_id: Number(m[1]), volume: { 2288: 0.005, 2270: 0.005, 2396: 0.19, 2399: 0.19, 2329: 0.75 }[m[1]] || 1, capacity: { 2524: 500, 2544: 10000 }[m[1]] || 0 }, D);
+    if ((m = path.match(/\/universe\/types\/(\d+)\/$/))) { const lt = lootOf.get(Number(m[1])); return answer({ type_id: Number(m[1]), volume: lt ? lt[2] : { 2288: 0.005, 2270: 0.005, 2396: 0.19, 2399: 0.19, 2329: 0.75 }[m[1]] || 1, capacity: { 2524: 500, 2544: 10000 }[m[1]] || 0, group_id: lt ? lt[1] : undefined }, D); }
+    if ((m = path.match(/\/markets\/(\d+)\/history\/$/)) && lootOf.has(Number(q.type_id))) {
+      const base = { 30744: 4000, 30745: 900, 30746: 300, 25624: 600, 30259: 1500, 30377: 9000, 30378: 5000, 20424: 2500 }[q.type_id];
+      const mult = { 10000002: 1, 10000043: 0.2, 10000032: 0.08, 10000042: 0.05, 10000030: 0.002 }[m[1]] || 0;
+      return answer([1, 2, 3, 4, 5, 6, 7].map(i => ({ date: iso(i * D).slice(0, 10), average: lootOf.get(Number(q.type_id))[3], highest: 0, lowest: 0, order_count: 5, volume: Math.round(base * mult) })).filter(x => x.volume).reverse(), D);
+    }
     if ((m = path.match(/\/markets\/(\d+)\/history\/$/))) return answer([1, 2, 3, 4, 5, 6, 7, 8].map(i => ({ date: iso(i * D).slice(0, 10), average: 1540000 + i * 2100, highest: 1560000, lowest: 1500000, order_count: 9, volume: 20 + i })).reverse(), D);
-    if (/\/markets\/prices\/$/.test(path)) return answer([{ type_id: 527, average_price: 884000 }, { type_id: 2329, average_price: 9100 }, { type_id: 12733, average_price: 251400000 }], 60 * M, 20 * M);
+    if (/\/markets\/prices\/$/.test(path)) return answer([{ type_id: 527, average_price: 884000 }, { type_id: 2329, average_price: 9100 }, { type_id: 12733, average_price: 251400000 }, { type_id: 11188, average_price: 318000000 }].concat(loot.map(x => ({ type_id: x[0], average_price: x[3] }))), 60 * M, 20 * M);
     if ((m = path.match(/\/markets\/(\d+)\/orders\/$/))) return answer(books[m[1] + ':' + q.type_id] || [], 5 * M, 2.4 * M);
     if ((m = path.match(/\/universe\/stations\/(\d+)\/$/))) return answer({ station_id: Number(m[1]), name: names[m[1]] || 'Station ' + m[1], system_id: SYS[m[1]] || 30000144 }, D);
     if ((m = path.match(/\/universe\/systems\/(\d+)\/$/))) { const s = systems[m[1]] || ['System ' + m[1], 0.9]; return answer({ system_id: Number(m[1]), name: s[0], security_status: s[1] }, D); }
@@ -179,5 +222,5 @@
     return Promise.reject(new window.Esi.EsiError(404, 'Sample data has no answer for ' + path));
   }
 
-  window.Demo = { on, get, post, who: { id: CHAR, name: 'Sample Trader', scopes: [] } };
+  window.Demo = { on, get, post, who: { id: CHAR, name: 'Sample Trader', scopes: [] }, scout: { id: SCOUT, name: 'Sample Scout', scopes: [] } };
 })();

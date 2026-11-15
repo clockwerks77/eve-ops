@@ -116,7 +116,7 @@
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, wantWake: false, wake: null,
-    prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [], scout: null,
+    prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
   const me = () => '/characters/' + S.who.id;
@@ -249,7 +249,7 @@
   }
   /** The wormhole pilot, if signed in: their wallet, assets, orders and skill queue for the combined figures. */
   async function loadScout() {
-    const sc = demo ? null : E.who('scout');
+    const sc = demo ? window.Demo.scout : E.who('scout');
     if (!sc) { S.scout = null; return; }
     const base = '/characters/' + sc.id, a = { auth: 'scout' };
     const r = await Promise.all([E.get(base + '/wallet/', a), E.get(base + '/assets/', a), E.get(base + '/skillqueue/', a), E.get(base + '/orders/', a)]);
@@ -271,16 +271,48 @@
       tops.add(cur.location_id);
       if (holder) holders.add(holder.type_id);
     }
-    const placeNames = {};
+    const placeNames = {}, placeSys = {};
     await Promise.all(Array.from(tops).map(async id => {
       try {
-        if (id >= 1e12) placeNames[id] = (await E.get('/universe/structures/' + id + '/', a)).data.name;
-        else if (id >= 6e7 && id < 7e7) placeNames[id] = (await station(id)).name;
-        else if (id >= 3e7 && id < 4e7) placeNames[id] = 'In space in ' + (await system(id)).name;
+        if (id >= 1e12) { const st = (await E.get('/universe/structures/' + id + '/', a)).data; placeNames[id] = st.name; placeSys[id] = st.solar_system_id; }
+        else if (id >= 6e7 && id < 7e7) { const st = await station(id); placeNames[id] = st.name; placeSys[id] = st.system; }
+        else if (id >= 3e7 && id < 4e7) { placeNames[id] = 'In space in ' + (await system(id)).name; placeSys[id] = id; }
       } catch (err) { placeNames[id] = id >= 1e12 ? 'A structure (name not available)' : 'Unknown place'; }
     }));
     await resolveNames(Array.from(kinds.keys()).concat(Array.from(holders))).catch(() => {});
-    S.scout = { name: sc.name, wallet: r[0].data, assets: all, queue: r[2].data, orders: r[3].data, kinds, where, placeNames };
+    S.scout = { name: sc.name, wallet: r[0].data, assets: all, queue: r[2].data, orders: r[3].data, kinds, where, placeNames, placeSys };
+  }
+  /** Every hub's book for each kind of loot the wormhole pilot holds, and the jumps from where it sits to each hub. */
+  async function loadLoot() {
+    const sc = S.scout;
+    if (!sc || !sc.kinds.size) { S.lootBooks.clear(); S.lootVol.clear(); S.lootSig = ''; delete S.feeds['Loot prices']; return; }
+    const types = Array.from(new Set(sc.assets.filter(x => sc.where.has(x.item_id) && !x.is_blueprint_copy).map(x => x.type_id))).sort((x, y) => x - y);
+    const hubs = (await Promise.all(C.hubs.map(hb => station(hb.station).then(st => ({ hb, sys: st.system }), () => null)))).filter(Boolean);
+    const sig = types.join(',');
+    if (sig !== S.lootSig || Date.now() - S.lootAt > 10 * M) {
+      let failed = 0, oldest = Infinity;
+      const next = new Map(), vol = new Map();
+      await Promise.all(types.map(t => Promise.all(C.hubs.map(async hb => {
+        try {
+          const r = await E.get('/markets/' + hb.region + '/orders/', { query: { order_type: 'all', type_id: t } });
+          next.set(hb.region + ':' + t, r.data); oldest = Math.min(oldest, r.modified);
+        } catch (err) { failed++; }
+        try { vol.set(hb.region + ':' + t, L.tradedPerDay((await E.get('/markets/' + hb.region + '/history/', { query: { type_id: t } })).data, Date.now(), 7)); }
+        catch (err) { /* pace not known for this hub */ }
+      }))));
+      S.lootBooks = next; S.lootVol = vol; S.lootSig = sig; S.lootAt = Date.now();
+      S.feeds['Loot prices'] = { at: isFinite(oldest) ? oldest : 0, next: S.lootAt + 10 * M, err: failed ? failed + ' of ' + types.length * C.hubs.length + ' books did not load.' : null };
+    }
+    const jumps = {};
+    await Promise.all(Object.keys(sc.placeSys).map(async top => {
+      const from = sc.placeSys[top];
+      if (!from || from >= 31000000) return;      // no stargate route out of wormhole space
+      jumps[top] = {};
+      await Promise.all(hubs.map(async x => {
+        try { jumps[top][x.hb.station] = (await route(from, x.sys, 'shortest')).length - 1; } catch (err) { /* no route */ }
+      }));
+    }));
+    S.lootJumps = jumps;
   }
   async function loadPrices() {
     const r = await E.get('/markets/prices/');
@@ -405,7 +437,7 @@
       await Promise.all([load('Market books', loadBooks), load('Routes', loadRoutes), load('Item prices', loadPrices), load('Second character', loadScout)]);
       await loadReach().catch(() => {});
       paint();
-      await loadHistory().catch(() => {});
+      await Promise.all([loadHistory().catch(() => {}), load('Loot prices', loadLoot)]);
     } finally {
       S.running = false;
       paint();
@@ -603,19 +635,58 @@
       const sq = S.scout.queue.filter(x => x.finish_date && Date.parse(x.finish_date) > now).sort((a, b) => a.queue_position - b.queue_position);
       scout = { name: S.scout.name, wallet: S.scout.wallet, held: sheld, wealth: S.scout.wallet + sheld + sorders,
         queue: sq.map(x => ({ name: nameOf(x.skill_id), level: x.finished_level, done: Date.parse(x.finish_date) })), paused: S.scout.queue.filter(x => !x.finish_date).length };
+      // where each kind of loot sells: every hub's lowest ask and standing bids, for all the units held
+      const sellQty = new Map();
+      for (const a of S.scout.assets) if (S.scout.where.has(a.item_id) && !a.is_blueprint_copy) sellQty.set(a.type_id, (sellQty.get(a.type_id) || 0) + a.quantity);
+      const lootHubs = C.hubs.map(hb => ({ name: hb.name, station: hb.station, region: hb.region, system: (K.stations[hb.station] || {}).system }));
+      const market = new Map();
+      for (const e of sellQty) {
+        const jb = S.lootBooks.get(C.jita.region + ':' + e[0]);
+        let ref = null;
+        if (jb) for (const o of jb) if (!o.is_buy_order && o.location_id === C.jita.station && (ref == null || o.price < ref)) ref = o.price;
+        market.set(e[0], L.sellAt(lootHubs, hb => S.lootBooks.get(hb.region + ':' + e[0]), e[1], { ref: ref || S.prices.get(e[0]) || null, refStation: ref ? C.jita.station : null, share: C.loot.share, days: C.loot.days,
+          perDay: hb => { const v = S.lootVol.get(hb.region + ':' + e[0]); return v == null ? null : v; } }));
+      }
       const places = new Map();
       for (const a of S.scout.assets) {
         const w = S.scout.where.get(a.item_id), kd = S.scout.kinds.get(a.type_id);
         if (!w || !kd) continue;
         const hold = /Gas/.test(w.flag) ? ' gas hold' : /Ore/.test(w.flag) ? ' ore hold' : /Fleet/.test(w.flag) ? ' fleet hangar' : /Cargo/.test(w.flag) ? ' cargo' : '';
         const label = (S.scout.placeNames[w.top] || 'Unknown place') + (w.holder ? ', in ' + nameOf(w.holder) + hold : '');
-        const p = places.get(label) || { name: label, rows: new Map(), value: 0, m3: 0 };
-        const row = p.rows.get(a.type_id) || { type: a.type_id, name: nameOf(a.type_id), kind: kd.kind, group: kd.group, qty: 0, m3: 0, value: 0 };
+        const p = places.get(label) || { name: label, top: w.top, rows: new Map(), value: 0, m3: 0 };
+        const row = p.rows.get(a.type_id) || { type: a.type_id, name: nameOf(a.type_id), kind: kd.kind, group: kd.group, qty: 0, sell: 0, m3: 0, value: 0 };
         const val = a.is_blueprint_copy ? 0 : (S.prices.get(a.type_id) || 0) * a.quantity, vol = ((K.types[a.type_id] || {}).v || 0) * a.quantity;
         row.qty += a.quantity; row.m3 += vol; row.value += val; p.value += val; p.m3 += vol;
+        if (!a.is_blueprint_copy) row.sell += a.quantity;
         p.rows.set(a.type_id, row); places.set(label, p);
       }
-      scout.loot = Array.from(places.values()).map(p => Object.assign(p, { rows: Array.from(p.rows.values()).sort((x, y) => y.value - x.value) })).sort((x, y) => y.value - x.value);
+      const NOW = 1 - C.fees.salesTax, worth = r => (r.list ? r.list.value : r.now ? r.now.value : r.value);
+      scout.loot = Array.from(places.values()).map(p => {
+        const rows = Array.from(p.rows.values());
+        for (const r of rows) {
+          const mk = market.get(r.type), all = sellQty.get(r.type) || 0;
+          const lh = mk && mk.list ? mk.hubs.find(x => x.name === mk.list) : null, nh = mk && mk.now ? mk.hubs.find(x => x.name === mk.now) : null;
+          r.hubs = mk ? mk.hubs : [];
+          r.list = lh && r.sell ? { hub: lh.name, value: r.sell * lh.fair * NET, days: lh.days, slow: lh.slow } : null;
+          r.now = nh && r.sell && all ? { hub: nh.name, value: nh.now * (r.sell / all) * NOW, filled: nh.filled, of: all } : null;
+        }
+        return Object.assign(p, { rows: rows.sort((x, y) => worth(y) - worth(x)), list: sum(rows, r => (r.list ? r.list.value : 0)), now: sum(rows, r => (r.now ? r.now.value : 0)), jumps: S.lootJumps[p.top] || null });
+      }).sort((x, y) => (y.list || y.value) - (x.list || x.value));
+      // the whole pile taken to one hub, and each item taken to its best hub
+      const units = sum(Array.from(sellQty.values()), q => q);
+      scout.sell = {
+        ready: S.lootBooks.size > 0, types: sellQty.size, units,
+        hubs: lootHubs.map(hb => {
+          let list = 0, now = 0, noAsk = 0, slow = 0, filled = 0;
+          for (const e of sellQty) {
+            const x = market.get(e[0]).hubs.find(y => y.station === hb.station);
+            if (x.ask != null) { list += e[1] * x.fair * NET; if (x.slow) slow++; } else noAsk++;
+            now += x.now * NOW; filled += x.filled;
+          }
+          return { name: hb.name, station: hb.station, list, now, noAsk, slow, filled };
+        }),
+        split: { list: sum(scout.loot, p => p.list), now: sum(scout.loot, p => p.now) },
+      };
     }
 
     const sellHub = C.hubs.find(x => x.station === C.pi.sellStation) || C.hubs[0];
@@ -911,26 +982,60 @@
       m.seenAt && h('p', { class: 'note' }, 'Counting from ', live('ago', m.seenAt), '.'));
   }
 
-  /** The wormhole pilot's exploration loot and gas, by where it sits, for planning hand-overs to the trader. */
+  /** The wormhole pilot's exploration loot and gas, by where it sits, with what each hub pays, for planning hand-overs to the trader. */
   function lootView(m) {
     const sc = m.scout;
     if (!sc || !sc.loot) return null;
-    const total = sum(sc.loot, p => p.value), vol = sum(sc.loot, p => p.m3);
-    const kind = k => sum(sc.loot, p => sum(p.rows.filter(r => r.kind === k), r => r.value));
+    const sell = sc.sell, ready = sell.ready, vol = sum(sc.loot, p => p.m3), avg = sum(sc.loot, p => p.value);
+    const kind = k => sum(sc.loot, p => sum(p.rows.filter(r => r.kind === k), r => (ready ? (r.list ? r.list.value : r.now ? r.now.value : 0) : r.value)));
+    const pct = x => +(x * 100).toFixed(3) + '%';
+    const fig = (v, u) => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + u;     // three figures, so near prices stay apart
+    const px = n => (n >= 1e9 ? fig(n / 1e9, 'B') : n >= 1e6 ? fig(n / 1e6, 'M') : n >= 1e3 ? fig(n / 1e3, 'k') : L.isk(n));
+    const cube = v => (v > 0 && v < 0.5 ? 'under 1' : num(Math.round(v)));
+    const pace = d => (d == null ? '' : !isFinite(d) ? ', no trade there this week' : d <= 1 ? ' within a day' : ' in about ' + Math.ceil(d) + ' days');
+    const jumpsText = j => (j == null ? null : j === 0 ? 'here' : j + (j === 1 ? ' jump' : ' jumps'));
+    const top = f => Math.max.apply(null, sell.hubs.map(f));
+    const hubCell = (r, hb) => {
+      const x = r.hubs.find(y => y.station === hb.station);
+      if (!x || (x.ask == null && x.bid == null)) return h('td', null, '');
+      return h('td', { class: r.list && r.list.hub === x.name ? 'best' : '', title: x.perDay == null ? null : 'About ' + num(Math.round(x.perDay)) + ' a day traded in that region this week' },
+        x.ask == null ? h('span', { class: 'sub' }, 'no asks') : x.thin ? h('span', { class: 'thin', title: 'A lone listing far above the Jita price: counted at the Jita price' }, px(x.ask)) : px(x.ask),
+        h('span', { class: 'sub' + (r.now && r.now.hub === x.name ? ' best-bid' : '') }, x.bid == null ? 'no bids' : 'bid ' + px(x.bid)));
+    };
     return h('section', { class: 'pi', id: 'loot' },
       h('header', { class: 'pi-head' }, h('h2', null, 'Loot and gas to hand over'),
-        h('span', { class: 'stop-sum' }, sc.loot.length ? 'About ' + L.short(total) + ', ' + num(Math.round(vol)) + ' m³' : 'Nothing found')),
+        h('span', { class: 'stop-sum' }, !sc.loot.length ? 'Nothing found'
+          : ready ? 'List for about ' + L.short(sell.split.list) + ', or sell now for about ' + L.short(sell.split.now) + ', ' + cube(vol) + ' m³'
+          : 'About ' + L.short(avg) + ', ' + cube(vol) + ' m³')),
       h('p', { class: 'pi-note' }, sc.loot.length
-        ? 'Exploration ' + L.short(kind('Exploration')) + ', gas ' + L.short(kind('Gas')) + '. Grouped by where ' + sc.name + ' has it, valued at EVE average prices. The asset list updates hourly.'
-        : 'No exploration loot or gas in ' + sc.name + '\u2019s hangars or holds. The asset list updates hourly.'),
+        ? 'Exploration ' + L.short(kind('Exploration')) + ', gas ' + L.short(kind('Gas')) + '. Grouped by where ' + sc.name + ' has it.' + (ready ? '' : ' Valued at EVE average prices while the hub prices load.')
+        : 'No exploration loot or gas in ' + sc.name + '’s hangars or holds. The asset list updates hourly.'),
+      ready && sc.loot.length ? h('div', { class: 'block' },
+        h('div', { class: 'block-head' }, h('h3', null, 'Which hub pays best'), h('span', { class: 'why' }, 'all ' + plural(sell.units, 'unit') + ' of ' + plural(sell.types, 'item') + ' taken to one hub, after fees')),
+        h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table loot-sum' },
+          h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Hub'), h('th', null, 'Listed at the lowest ask'), h('th', null, 'Sold now to bids'))),
+          h('tbody', null, sell.hubs.map(x => h('tr', null,
+            h('td', { class: 'l' }, x.name),
+            h('td', { class: x.list > 0 && x.list === top(y => y.list) ? 'best' : '' }, x.list ? L.short(x.list) : '',
+              x.noAsk || x.slow ? h('span', { class: 'sub' }, [x.noAsk ? x.noAsk + ' of ' + plural(sell.types, 'item') + ' not on sale there' : null, x.slow ? x.slow + (x.slow === 1 ? ' item' : ' items') + ' would take over ' + C.loot.days + ' days' : null].filter(Boolean).join(', ')) : null),
+            h('td', { class: x.now > 0 && x.now === top(y => y.now) ? 'best' : '' }, x.now ? L.short(x.now) : '', x.filled < sell.units ? h('span', { class: 'sub' }, x.filled ? 'bids take ' + num(x.filled) + ' of ' + plural(sell.units, 'unit') : 'no bids') : null))),
+            h('tr', { class: 'loot-split' }, h('td', { class: 'l' }, 'Each item at its best hub'), h('td', null, L.short(sell.split.list)), h('td', null, L.short(sell.split.now))))))) : null,
       sc.loot.map(p => h('div', { class: 'block' },
-        h('div', { class: 'block-head' }, h('h3', null, p.name), h('span', { class: 'why' }, L.short(p.value) + ', ' + num(Math.round(p.m3)) + ' m³')),
+        h('div', { class: 'block-head' }, h('h3', null, p.name),
+          h('span', { class: 'why' }, (ready ? 'list about ' + L.short(p.list) + ', sell now about ' + L.short(p.now) : 'about ' + L.short(p.value)) + ', ' + cube(p.m3) + ' m³')),
         h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
-          h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Item'), h('th', null, 'Kind'), h('th', null, 'Units'), h('th', null, 'm³'), h('th', null, 'Each'), h('th', null, 'Value'))),
+          h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Item'), h('th', null, 'Units'), h('th', null, 'm³'),
+            ready ? [h('th', null, 'List in'), h('th', null, 'Sell now in'), C.hubs.map(hb => h('th', null, hb.name, p.jumps && p.jumps[hb.station] != null ? h('span', { class: 'sub' }, jumpsText(p.jumps[hb.station])) : null))]
+              : [h('th', null, 'Each'), h('th', null, 'Value')])),
           h('tbody', null, p.rows.map(r => h('tr', null,
             h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), h('span', null, r.name, h('span', { class: 'sub' }, r.group)))),
-            h('td', null, r.kind), h('td', null, num(r.qty)), h('td', null, num(Math.round(r.m3))),
-            h('td', null, r.value ? L.short(r.value / r.qty) : ''), h('td', null, r.value ? L.short(r.value) : 'not priced')))))))));
+            h('td', null, num(r.qty)), h('td', null, cube(r.m3)),
+            ready ? [h('td', { class: r.list ? 'best' : '' }, r.list ? [r.list.hub, h('span', { class: 'sub' + (r.list.slow ? ' neg' : '') }, L.short(r.list.value) + pace(r.list.days))] : h('span', { class: 'sub' }, r.sell ? 'not on sale at a hub' : 'blueprint copy, contract only')),
+              h('td', null, r.now ? [r.now.hub, h('span', { class: 'sub' }, L.short(r.now.value) + (r.now.filled < r.now.of ? ', bids take ' + num(r.now.filled) + ' of ' + num(r.now.of) : ''))] : h('span', { class: 'sub' }, r.sell ? 'no bids' : '')),
+              C.hubs.map(hb => hubCell(r, hb))]
+              : [h('td', null, r.value ? L.short(r.value / r.qty) : ''), h('td', null, r.value ? L.short(r.value) : 'not priced')]))))))),
+      ready && sc.loot.length ? h('p', { class: 'note' }, 'Each hub column is the lowest ask there with the top bid beneath, and the jumps from where the loot sits. “List in” is the hub with the highest ask where the pile would sell within ' + C.loot.days + ' days at ' + Math.round(C.loot.share * 100) + '% of that region’s trade, passing over a lone listing more than 1.5 times the Jita ask (dotted underline); when every hub is slower than that, it is the quickest one. “Sell now in” fills the bids standing at the hub station, in its system or region-wide with every unit held. Totals are after fees: '
+        + pct(C.fees.broker + C.fees.salesTax) + ' on a listing, ' + pct(C.fees.salesTax) + ' on a sale to a bid. Hub prices refresh every 10 minutes, the asset list hourly.') : null);
   }
 
   function piView(m) {
@@ -1058,7 +1163,7 @@
         : h('p', { class: 'note' }, m.windowDays < C.staleDays ? 'Needs ' + C.staleDays + ' days of sales history; EVE has returned ' + Math.floor(m.windowDays) + '.' : 'Every line has sold in the last ' + C.staleDays + ' days and clears within a month.'));
   }
   function dataPanel() {
-    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Hangars', 'Planets', 'Kill feed', 'Item prices', 'Location', 'Skills and clones', 'Routes'];
+    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Hangars', 'Planets', 'Kill feed', 'Item prices', 'Loot prices', 'Location', 'Skills and clones', 'Routes'];
     return h('section', { class: 'panel panel-data' }, h('h3', null, 'How fresh this is'),
       h('ul', { class: 'feeds' }, names.filter(n => S.feeds[n]).map(n => {
         const f = S.feeds[n];

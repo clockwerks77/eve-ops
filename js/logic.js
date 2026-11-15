@@ -434,6 +434,53 @@
     return m[1].replace(/\\u([0-9a-fA-F]{4})/g, (x, hex) => String.fromCharCode(parseInt(hex, 16)))
       .replace(/\\x([0-9a-fA-F]{2})/g, (x, hex) => String.fromCharCode(parseInt(hex, 16))).replace(/\\(['\\])/g, '$1');
   }
+  /** Units a day traded in a region over the last `days` calendar days, from ESI's daily history (days with no trade are simply absent). */
+  function tradedPerDay(history, now, days) {
+    const from = now - (days + 1) * 864e5;      // the newest day is published a day late
+    return sum((history || []).filter(r => Date.parse(r.date) >= from), r => r.volume) / days;
+  }
+
+  /**
+   * Where a pile of one item sells. At each hub: the lowest ask to list against, the top bid, what the
+   * standing bids that can be filled from that station would pay for `qty` units (best price first),
+   * and how long the pile would take to sell there at opts.share of the hub's daily trade.
+   * hubs: [{ name, station, system }]; bookOf(hub) -> that region's orders for the item (buys and sells);
+   * opts.perDay(hub) -> units a day traded there, or null when not known.
+   * opts.ref is a sane price for the item (the Jita ask, else EVE's average): an ask more than opts.far
+   * times it is a lone high listing. The place to list is the highest ask that is neither a lone listing
+   * nor slower than opts.days; failing that, the quickest hub.
+   */
+  function sellAt(hubs, bookOf, qty, opts) {
+    opts = opts || {};
+    const far = opts.far || 1.5, share = opts.share || 0.15, limit = opts.days || 14;
+    const rows = hubs.map(hb => {
+      const orders = bookOf(hb) || [];
+      let ask = null;
+      for (const o of orders) if (!o.is_buy_order && o.location_id === hb.station && (ask == null || o.price < ask)) ask = o.price;
+      const bids = orders.filter(o => o.is_buy_order && o.volume_remain > 0 &&
+        (o.location_id === hb.station || o.range === 'region' || (hb.system != null && o.system_id === hb.system && o.range !== 'station')))
+        .sort((a, b) => b.price - a.price);
+      let left = qty, now = 0;
+      for (const b of bids) {
+        if (left <= 0) break;
+        if ((b.min_volume || 1) > left) continue;
+        const take = Math.min(left, b.volume_remain);
+        now += take * b.price; left -= take;
+      }
+      const perDay = opts.perDay ? opts.perDay(hb) : null;
+      const days = perDay == null ? null : perDay > 0 ? qty / (perDay * share) : Infinity;
+      return { name: hb.name, station: hb.station, ask, bid: bids.length ? bids[0].price : null, now, filled: qty - left, thin: false, perDay, days, slow: days != null && days > limit };
+    });
+    const ref = opts.ref || null;
+    for (const r of rows) r.thin = !!(ref && r.ask != null && r.station !== opts.refStation && r.ask > ref * far);
+    for (const r of rows) r.fair = r.thin ? ref : r.ask;      // what a listing there is counted at
+    const pick = (pool, f) => (pool.length ? pool.reduce((a, b) => (f(b) > f(a) ? b : a)) : null);
+    const asked = rows.filter(r => r.ask != null), sane = asked.filter(r => !r.thin), quick = sane.filter(r => !r.slow);
+    const list = quick.length ? pick(quick, r => r.ask) : sane.length ? pick(sane, r => -r.days) : pick(asked, r => r.ask);
+    const now = pick(rows.filter(r => r.filled > 0), r => r.now);
+    return { hubs: rows, list: list ? list.name : null, now: now ? now.name : null };
+  }
+
   /** Security status as the game shows it: one decimal, and anything above 0 never shows as 0.0. */
   function sec(s) {
     let r = Math.round(s * 10) / 10;
@@ -445,7 +492,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, programOutput, piRun, parseSigs,
+    orderChecks, weekOf, moveRead, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

@@ -46,6 +46,8 @@ window.EVEOPS_CONFIG = {
 
   // Restock shortlist: lines with this many days of stock or fewer, that sold at least minWeek units in 7 days. Lines netting under minMargin are listed but not offered a bid.
   restock: { days: 4, minWeek: 5, minMargin: 0.10 },
+  // Loot hand-overs: a hub is a place to list a pile only if it would sell within `days` at `share` of that hub's daily trade.
+  loot: { share: 0.15, days: 14 },
   // Hauler cargo in m3 (the fitted figure; change it on the page whenever the fit changes).
   haul: { cargo: 11016 },
 

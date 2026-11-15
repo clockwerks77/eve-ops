@@ -198,6 +198,12 @@ button { font: inherit; color: inherit; }
 .pi-table .l { text-align: left; padding-left: 0; }
 .pi-item { display: flex; align-items: center; gap: 0.55rem; }
 .pi-table .best { color: var(--lead); font-weight: 600; }
+.pi-table .best-bid { color: var(--calm); }
+.pi-table .thin { text-decoration: underline dotted; text-underline-offset: 3px; }
+.pi-table .sub.neg { color: var(--bad); }
+.loot-sum { max-width: 38rem; }
+.loot-sum td .sub { white-space: normal; max-width: 15rem; margin-left: auto; }
+.loot-split td { color: var(--dim); }
 
 /* wide: the rows become a table, labels move to one header line */
 @container (min-width: 49rem) {
