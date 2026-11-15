@@ -77,11 +77,23 @@
     return K.systems[id];
   }
   async function typeInfo(id) {
-    if (K.types[id]) return K.types[id];
+    if (K.types[id] && K.types[id].g) return K.types[id];
     const r = await E.get('/universe/types/' + id + '/');
-    K.types[id] = { v: r.data.volume || 0, cap: r.data.capacity || 0 }; saveStatic();
+    K.types[id] = { v: r.data.packaged_volume || r.data.volume || 0, cap: r.data.capacity || 0, g: r.data.group_id }; saveStatic();
     return K.types[id];
   }
+  /** An item group's name and its category's name, kept between visits. */
+  async function groupInfo(id) {
+    K.groups = K.groups || {};
+    if (K.groups[id]) return K.groups[id];
+    const r = await E.get('/universe/groups/' + id + '/');
+    const cat = await E.get('/universe/categories/' + r.data.category_id + '/').then(x => x.data.name, () => '');
+    K.groups[id] = { name: r.data.name, cat }; saveStatic();
+    return K.groups[id];
+  }
+  // What counts as exploration loot and as gas, by item group name.
+  const GAS = /Harvestable Cloud|Compressed Gas/i;
+  const LOOT = /Salvaged Materials|Ancient Salvage|Sleeper Components|Datacores|Decryptors|Materials and Compounds|Artifacts and Prototypes|Rogue Drone Components|Overseer|Triglavian Data|Research Data/i;
   async function planetName(id) {
     if (K.planets[id]) return K.planets[id];
     const r = await E.get('/universe/planets/' + id + '/');
@@ -242,7 +254,33 @@
     const base = '/characters/' + sc.id, a = { auth: 'scout' };
     const r = await Promise.all([E.get(base + '/wallet/', a), E.get(base + '/assets/', a), E.get(base + '/skillqueue/', a), E.get(base + '/orders/', a)]);
     await resolveNames(r[2].data.map(q => q.skill_id)).catch(() => {});
-    S.scout = { name: sc.name, wallet: r[0].data, assets: r[1].data, queue: r[2].data, orders: r[3].data };
+    // exploration loot and gas among her stacked items, and where each stack sits
+    const all = r[1].data, byItem = new Map(all.map(x => [x.item_id, x])), kinds = new Map(), where = new Map(), tops = new Set(), holders = new Set();
+    await Promise.all(Array.from(new Set(all.filter(x => !x.is_singleton).map(x => x.type_id))).map(async t => {
+      try {
+        const g = await groupInfo((await typeInfo(t)).g);
+        const kind = GAS.test(g.name) ? 'Gas' : LOOT.test(g.name) || /Ancient Relics/i.test(g.cat) ? 'Exploration' : null;
+        if (kind) kinds.set(t, { kind, group: g.name });
+      } catch (err) { /* unknown type: leave it out */ }
+    }));
+    for (const x of all) {
+      if (x.is_singleton || !kinds.has(x.type_id)) continue;
+      let cur = x, holder = null;
+      for (let i = 0; i < 6 && byItem.has(cur.location_id); i++) { cur = byItem.get(cur.location_id); holder = holder || cur; }
+      where.set(x.item_id, { top: cur.location_id, holder: holder ? holder.type_id : null, flag: x.location_flag });
+      tops.add(cur.location_id);
+      if (holder) holders.add(holder.type_id);
+    }
+    const placeNames = {};
+    await Promise.all(Array.from(tops).map(async id => {
+      try {
+        if (id >= 1e12) placeNames[id] = (await E.get('/universe/structures/' + id + '/', a)).data.name;
+        else if (id >= 6e7 && id < 7e7) placeNames[id] = (await station(id)).name;
+        else if (id >= 3e7 && id < 4e7) placeNames[id] = 'In space in ' + (await system(id)).name;
+      } catch (err) { placeNames[id] = id >= 1e12 ? 'A structure (name not available)' : 'Unknown place'; }
+    }));
+    await resolveNames(Array.from(kinds.keys()).concat(Array.from(holders))).catch(() => {});
+    S.scout = { name: sc.name, wallet: r[0].data, assets: all, queue: r[2].data, orders: r[3].data, kinds, where, placeNames };
   }
   async function loadPrices() {
     const r = await E.get('/markets/prices/');
@@ -565,6 +603,19 @@
       const sq = S.scout.queue.filter(x => x.finish_date && Date.parse(x.finish_date) > now).sort((a, b) => a.queue_position - b.queue_position);
       scout = { name: S.scout.name, wallet: S.scout.wallet, held: sheld, wealth: S.scout.wallet + sheld + sorders,
         queue: sq.map(x => ({ name: nameOf(x.skill_id), level: x.finished_level, done: Date.parse(x.finish_date) })), paused: S.scout.queue.filter(x => !x.finish_date).length };
+      const places = new Map();
+      for (const a of S.scout.assets) {
+        const w = S.scout.where.get(a.item_id), kd = S.scout.kinds.get(a.type_id);
+        if (!w || !kd) continue;
+        const hold = /Gas/.test(w.flag) ? ' gas hold' : /Ore/.test(w.flag) ? ' ore hold' : /Fleet/.test(w.flag) ? ' fleet hangar' : /Cargo/.test(w.flag) ? ' cargo' : '';
+        const label = (S.scout.placeNames[w.top] || 'Unknown place') + (w.holder ? ', in ' + nameOf(w.holder) + hold : '');
+        const p = places.get(label) || { name: label, rows: new Map(), value: 0, m3: 0 };
+        const row = p.rows.get(a.type_id) || { type: a.type_id, name: nameOf(a.type_id), kind: kd.kind, group: kd.group, qty: 0, m3: 0, value: 0 };
+        const val = a.is_blueprint_copy ? 0 : (S.prices.get(a.type_id) || 0) * a.quantity, vol = ((K.types[a.type_id] || {}).v || 0) * a.quantity;
+        row.qty += a.quantity; row.m3 += vol; row.value += val; p.value += val; p.m3 += vol;
+        p.rows.set(a.type_id, row); places.set(label, p);
+      }
+      scout.loot = Array.from(places.values()).map(p => Object.assign(p, { rows: Array.from(p.rows.values()).sort((x, y) => y.value - x.value) })).sort((x, y) => y.value - x.value);
     }
 
     const sellHub = C.hubs.find(x => x.station === C.pi.sellStation) || C.hubs[0];
@@ -860,6 +911,28 @@
       m.seenAt && h('p', { class: 'note' }, 'Counting from ', live('ago', m.seenAt), '.'));
   }
 
+  /** The wormhole pilot's exploration loot and gas, by where it sits, for planning hand-overs to the trader. */
+  function lootView(m) {
+    const sc = m.scout;
+    if (!sc || !sc.loot) return null;
+    const total = sum(sc.loot, p => p.value), vol = sum(sc.loot, p => p.m3);
+    const kind = k => sum(sc.loot, p => sum(p.rows.filter(r => r.kind === k), r => r.value));
+    return h('section', { class: 'pi', id: 'loot' },
+      h('header', { class: 'pi-head' }, h('h2', null, 'Loot and gas to hand over'),
+        h('span', { class: 'stop-sum' }, sc.loot.length ? 'About ' + L.short(total) + ', ' + num(Math.round(vol)) + ' m³' : 'Nothing found')),
+      h('p', { class: 'pi-note' }, sc.loot.length
+        ? 'Exploration ' + L.short(kind('Exploration')) + ', gas ' + L.short(kind('Gas')) + '. Grouped by where ' + sc.name + ' has it, valued at EVE average prices. The asset list updates hourly.'
+        : 'No exploration loot or gas in ' + sc.name + '\u2019s hangars or holds. The asset list updates hourly.'),
+      sc.loot.map(p => h('div', { class: 'block' },
+        h('div', { class: 'block-head' }, h('h3', null, p.name), h('span', { class: 'why' }, L.short(p.value) + ', ' + num(Math.round(p.m3)) + ' m³')),
+        h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+          h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Item'), h('th', null, 'Kind'), h('th', null, 'Units'), h('th', null, 'm³'), h('th', null, 'Each'), h('th', null, 'Value'))),
+          h('tbody', null, p.rows.map(r => h('tr', null,
+            h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), h('span', null, r.name, h('span', { class: 'sub' }, r.group)))),
+            h('td', null, r.kind), h('td', null, num(r.qty)), h('td', null, num(Math.round(r.m3))),
+            h('td', null, r.value ? L.short(r.value / r.qty) : ''), h('td', null, r.value ? L.short(r.value) : 'not priced')))))))));
+  }
+
   function piView(m) {
     const p = m.pi;
     if (!p) return null;
@@ -1030,7 +1103,7 @@
     const m = S.ready ? build() : null;
     const y = window.scrollY;
     if (S.view === 'wh' && window.Wh) {
-      root.replaceChildren(demo ? h('p', { class: 'banner' }, 'Sample data. ', h('a', { href: './' }, 'Leave sample data')) : '', topView(m), window.Wh.view(paint));
+      root.replaceChildren(demo ? h('p', { class: 'banner' }, 'Sample data. ', h('a', { href: './' }, 'Leave sample data')) : '', topView(m), window.Wh.view(paint, m ? lootView(m) : null));
       return window.scrollTo(0, y);
     }
     root.replaceChildren(

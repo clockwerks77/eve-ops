@@ -224,7 +224,7 @@
   }
 
   // ------------------------------------------------------------------ view
-  function view(repaint) {
+  function view(repaint, extra) {
     S.repaint = repaint;
     const me = who();
     if (!me) {
@@ -248,7 +248,7 @@
         h('section', { class: 'wh-block' }, h('h3', null, 'Chain'), Object.keys(W.systems).length ? chainSvg() : null,
           h('p', { class: 'note' }, 'A system is added each time ' + me.name + ' jumps while this page is open. Jumps through stargates are not drawn. Select a system to see it below and at right.')),
         h('section', { class: 'wh-block' }, h('h3', null, s.name + ', system map'), h('div', { class: 'wh-split' }, h('div', { class: 'wh-map' }, systemSvg(s, readout), readout), infoCol(id, s)),
-          h('p', { class: 'note' }, 'Planets and any structure this pilot has docked in sit at their true bearing from the sun, with distances compressed. Signatures are on the outer ring in the order pasted: EVE gives no position for them.'))),
+          h('p', { class: 'note' }, 'Planets and any structure this pilot has docked in sit at their true bearing from the sun, with distances compressed. Signatures are on the outer ring in the order pasted: EVE gives no position for them.')), extra || null),
       h('aside', { class: 'side' },
         h('section', { class: 'panel' }, h('h3', null, s.name),
           h('dl', { class: 'facts' },
