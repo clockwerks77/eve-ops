@@ -234,5 +234,5 @@
     return res.json();
   }
 
-  window.Esi = { login, finishLogin, init, who, signOut, get, post, store, EsiError, native: !!N, tell, get paused() { return Math.max(0, pausedUntil - Date.now()); } };
+  window.Esi = { login, finishLogin, init, who, signOut, get, post, store, EsiError, native: !!N, tell, ask, get paused() { return Math.max(0, pausedUntil - Date.now()); } };
 })();

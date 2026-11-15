@@ -27,6 +27,9 @@ class Bridge(context: Context, private val host: Host) {
 
         /** The page hands over the summary the widgets show. */
         fun snapshot(json: String, settled: Boolean)
+
+        /** The owner turned a notification on: Android may need to ask whether the app may post them. */
+        fun askNotifications()
     }
 
     private val ctx = context.applicationContext
@@ -87,6 +90,12 @@ class Bridge(context: Context, private val host: Host) {
             "snapshot" -> {
                 val data = m.optJSONObject("data") ?: return
                 host.snapshot(data.toString(), m.optBoolean("settled"))
+            }
+
+            "notify" -> {
+                val allowed = Alerts.allowed(ctx)
+                if (m.optBoolean("ask") && !allowed) host.askNotifications()
+                answer(reply, rpc, JSONObject().put("allowed", allowed))
             }
 
             "copy" -> {

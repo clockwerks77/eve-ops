@@ -90,10 +90,13 @@ class Headless(context: Context) {
             val linked = Bridge(ctx, object : Bridge.Host {
                 override fun login(slot: String) {}
 
+                override fun askNotifications() {}
+
                 override fun snapshot(json: String, settled: Boolean) {
                     if (!settled) return          // the page is still loading: wait for the full picture
                     Snapshots.save(ctx, json)
                     Widgets.updateAll(ctx)
+                    Alerts.handle(ctx, json, App.foreground)
                     main.removeCallbacks(quiet)
                     main.postDelayed(quiet, 6000)
                 }

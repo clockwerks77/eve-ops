@@ -13,4 +13,6 @@
     <string name="offline_retry">Try again</string>
     <string name="no_browser">No browser was found to open the EVE sign-in.</string>
     <string name="signed_in">Signed in. Loading.</string>
+    <string name="alerts_channel">Things to act on</string>
+    <string name="alerts_channel_about">An order that lost the lead, extractors that stopped, a launchpad that is nearly full. Chosen in the dashboard\'s Phone notifications panel.</string>
 </resources>

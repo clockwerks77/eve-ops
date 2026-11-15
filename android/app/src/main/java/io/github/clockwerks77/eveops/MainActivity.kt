@@ -1,10 +1,13 @@
 package io.github.clockwerks77.eveops
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.text.TextUtils
 import android.view.ViewGroup
@@ -185,6 +188,14 @@ class MainActivity : Activity(), Bridge.Host {
         if (!settled) return                      // mid-load figures would make the widgets flicker
         Snapshots.save(applicationContext, json)
         Widgets.updateAll(applicationContext)
+        Alerts.handle(applicationContext, json, App.foreground)
+    }
+
+    override fun askNotifications() {
+        // Android 13 and newer ask the owner once; before that an app may notify unless it has been switched off in settings.
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
+        }
     }
 
     // ---------------------------------------------------------------- helpers

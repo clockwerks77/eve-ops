@@ -34,6 +34,9 @@ Note that every site under `clockwerks77.github.io` shares the same browser stor
 - **Pins**: "Pin prices" freezes the prices for a stop while you work through it. Each row then waits until the market book shows that exact price.
 - **Copied marks**: pressing a price copies it and marks the row without adding a line: the button goes quiet with a tick, the time sits on its top border (press the time to remove the mark), and the newest reads "Last" with a bar at the row's left edge. The stop shows "3 of 7 copied", so the amber prices left are the ones still to do. The mark becomes "Changed" when the market book shows the order at that price; the Call column says so if newer data still shows the old price ("not in the book") or if the price to type has changed since. "Clear copied marks" clears a stop. Bids on the restock shortlist are marked the same way. Kept on each device for 6 hours (`copied` in `js/config.js`).
 - **Slow line**: a routine undercut on a sell line with no sale at that hub in 7 days, on stock bought more than 7 days ago, is offered as your call instead of "Change", with the fee it would cost (`slowFee` in `js/config.js`).
+- **Trip plan** (above the hub tabs): the hubs with something to do, in the order that takes the fewest jumps from where you are, with the jumps for each leg and how many systems on it lost ships or pods in the last hour ("hot"). Stock waiting in the Jita hangar is picked up before the hubs it is going to; if one of those is the hub you are docked in, it appears twice (its orders now, the drop on the way back). Shortest or secure routes, leave a hub out with its ×, hide the plan to one line.
+- **Weekly close** (under Planetary Interaction): one row per Monday-to-Sunday week. Sold and net after fees come from your sales with cost first in, first out (an estimate), and are fixed once the week has closed, so they outlast EVE's history. Broker fees and tax, wallet change and wallet at close are exact, from the wallet journal (EVE keeps 30 days). Type the tracker's net beside a finished week and the row says Tied or Off with the gap; after two tied weeks in a row (`tieOut` in `js/config.js`) the page says it can take over as the ledger. "Realized net to date" adds the weeks on the page to the figure you carry in from the tracker.
+- **Sync between devices** (side panel, off until you turn it on): pins, copied marks, "Mark as seen" and the weekly closes are kept the same on every device through one small file in a secret gist on your GitHub account. Make a fine-grained token with no repository access and the account permission Gists set to read and write, and paste it on each device; it is kept in that device's storage and sent only to `api.github.com`. A secret gist is unlisted, not private: anyone with its address can read it, so nothing but that game state goes in it.
 
 ## Wormholes tab
 
@@ -68,6 +71,7 @@ How it fits together:
 - **Widgets** show a summary that the page itself works out and hands to the app, so a widget can never disagree with the board. While the app is closed, the app loads the page off screen about every half hour (as often as Android allows a background app) and on a tap of a widget's refresh arrow. Each widget says when its figures are from.
 - **Text follows the widget's size.** For each size a widget is shown at, the app shows as many whole lines as fit and draws them as large as that size allows (`Fit` in `Faces.kt`). Resizing a widget redraws it. Lower lines drop first on a small widget.
 - A tap on a widget opens the matching view.
+- **Notifications** (off until you turn one on in the dashboard's Phone notifications panel, shown in the app): an order loses the lead, extractors stop, a launchpad is nearly full. The page lists what there is to say in the summary it hands the app; the app (`Alerts.kt`) tells you once about each new thing after a background refresh, and stays quiet while the dashboard is on screen.
 
 Getting the APK: GitHub builds it (`.github/workflows/android.yml`). Every push under `android/` is compiled, unit-tested and run on an emulator against the sample data. A release with the APK attached is published when a commit changes `android/RELEASE` (put the next number in it), or from the Actions tab: *Android app* → *Run workflow*.
 
@@ -102,6 +106,7 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
 - `index.html`, `css/app.css` — the page and its three layouts (monitor, tablet, phone)
 - `js/logic.js` — price steps, book position, calls, FIFO ledger (no network; unit-tested)
 - `js/esi.js` — sign-in and requests
+- `js/sync.js` — the optional sync file on GitHub
 - `js/app.js` — loading, model, drawing
 - `js/demo.js` — sample data behind `#demo`
 - `js/wh.js`, `js/whdata.js` — the Wormholes tab and its table of statics, effects and wormhole types
@@ -110,11 +115,13 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
 - `tools/` — checks to run before a push:
   - `node tools/render.js <folder>` draws the sample data at monitor, tablet and phone size and reports page errors or sideways overflow
   - `node tools/copy-test.js` presses price buttons on the sample data and checks the copied marks (clipboard, progress, Undo, clear)
+  - `node tools/board-test.js` works the trip plan and the weekly close on the sample data
+  - `node tools/sync-test.js` runs two stand-in devices against a stand-in for GitHub's gist API and checks that marks, pins and tracker figures travel
   - `node tools/app-link-test.js` checks the page's side of the Android app link with a stand-in for the app (give it a file name to rewrite the Android test fixture `android/app/src/test/resources/snapshot-demo.json`)
   - `tools/ci.sh [commit]` waits for GitHub's Android build and emulator run and prints what they reported
   - `tools/screens.sh <folder>` fetches the emulator screenshots
   - `tools/whdata.py` rebuilds `js/whdata.js` from Wanderer's data files
 
-The page sets a content security policy that allows requests only to `esi.evetech.net`, `login.eveonline.com`, `zkillboard.com` and the page's own address, and scripts only from this repository.
+The page sets a content security policy that allows requests only to `esi.evetech.net`, `login.eveonline.com`, `zkillboard.com`, `api.github.com` (the optional sync file) and the page's own address, and scripts only from this repository.
 
 The typeface is Barlow Semi Condensed (SIL Open Font License, see `fonts/LICENSE-Barlow.txt`). EVE Online and its data belong to CCP hf.

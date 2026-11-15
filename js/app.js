@@ -115,7 +115,7 @@
     orders: [], ordersAt: 0, tx: [], assets: [], books: new Map(), jumps: new Map(),
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
-    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, journal: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
+    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, journal: null, notify: Object.assign({ change: false, extractors: false, launchpad: false }, E.store.get('eveops.notify')), notifyAllowed: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
     prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
@@ -786,7 +786,8 @@
           withWork.push({ key: st.id + ':drop', s: st, jobs: [drop], again: true });
         } else if (jobs.length) withWork.push({ key: drop ? st.id + ':drop' : String(st.id), s: st, jobs });
       }
-      const going = withWork.filter(x => !S.tripSkip.has(x.s.id));
+      const wanted = withWork.filter(x => !S.tripSkip.has(x.s.id));
+      if (wanted.length > 1 && !Object.keys(S.legs).length) return null;          // hub-to-hub routes are still loading
       const idOf = key => (key === 'start' ? key : Number(String(key).split(':')[0]));
       const path = (a, b) => {                       // system by system, in travel order
         a = idOf(a); b = idOf(b);
@@ -797,6 +798,7 @@
         return ids ? (fwd ? ids : ids.slice().reverse()).map(hop) : null;
       };
       const dist = (a, b) => { const hops = path(a, b); return hops ? hops.length - 1 : null; };
+      const going = wanted.filter(x => dist('start', x.key) != null), lost = wanted.filter(x => going.indexOf(x) < 0);     // no route from here: left out and named
       const plan = going.length ? L.tripPlan(going.map(x => x.key), dist, going.filter(x => /:drop$/.test(x.key)).map(x => [String(jita), x.key])) : null;
       const stopsOut = plan ? plan.order.map((key, i) => {
         const x = going.find(g => g.key === key), hops = path(i ? plan.order[i - 1] : 'start', key) || [];
@@ -806,6 +808,7 @@
       return {
         stops: stopsOut, total: plan ? plan.total : 0, safe: S.tripSafe, stuck: going.length > 0 && !plan,
         skipped: withWork.filter(x => S.tripSkip.has(x.s.id) && !seen.has(x.s.id) && seen.add(x.s.id)).map(x => ({ id: x.s.id, short: x.s.short })),
+        lost: Array.from(new Set(lost.map(x => x.s.short))),
         idle: list.filter(st => !withWork.some(x => x.s === st)).map(st => st.short),
       };
     })();
@@ -850,6 +853,17 @@
       return { rows: rows.slice().reverse(), since: rows.length ? rows[0].start : cur, carried, toDate: (carried || 0) + sum(rows, r => r.net || 0), run: tie.run, need: C.tieOut.weeks, journal: !!S.journal };
     })();
 
+    // ---- alerts: what the Android app may notify about. One entry per thing, with an id that stays the same while it lasts.
+    const alerts = [];
+    for (const st of list) for (const r of st.sells.concat(st.bids)) {
+      const inHand = (r.pin && !r.pin.done) || (r.copied && r.copied.state === 'waiting' && !r.copied.moved);     // pinned or just copied: already being dealt with
+      if (r.plan.action === 'tick' && !inHand) alerts.push({ id: 'c' + r.id, kind: 'change', text: st.short + ': ' + r.name });
+    }
+    for (const p of S.planets) {
+      if (p.extractors && p.expiry > 0 && p.expiry < now) alerts.push({ id: 'x' + p.id + ':' + p.expiry, kind: 'extractors', text: p.name });
+      if (p.fill >= 0.85) alerts.push({ id: 'f' + p.id, kind: 'launchpad', text: p.name + ' at ' + Math.round(p.fill * 100) + '%' });
+    }
+
     // ---- what changed since the baseline ("Mark as seen")
     const snapshot = {};
     for (const st of list) for (const r of st.sells.concat(st.bids)) snapshot[r.id] = { t: r.type, l: st.id, b: st.bids.indexOf(r) >= 0, s: r.pos ? r.pos.status : '' };
@@ -893,7 +907,7 @@
 
     return {
       now, stops: list, slow: slow.slice(0, 8), tab: S.tab, pi,
-      restock: restock.slice(0, 12), haul, trip, closes, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
+      restock: restock.slice(0, 12), haul, trip, closes, alerts, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
       wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0, scout, both: wealth != null && scout ? wealth + scout.wealth : null,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
@@ -1086,7 +1100,7 @@
   /** The hubs with something to do, in the order that takes the fewest jumps from where the character is. */
   function tripView(m) {
     const t = m.trip;
-    if (!t || (!t.stops.length && !t.skipped.length)) return null;
+    if (!t || (!t.stops.length && !t.skipped.length && !t.lost.length)) return null;
     const pick = id => { S.tab = id; S.follow = false; paint(); };
     const skip = (id, on) => { if (on) S.tripSkip.add(id); else S.tripSkip.delete(id); paint(); };
     const keep = () => { if (!demo) E.store.set('eveops.trip', { safe: S.tripSafe, open: S.tripOpen }); paint(); };
@@ -1108,6 +1122,7 @@
         h('button', { type: 'button', class: 'trip-name' + (x.id === m.tab ? ' is-on' : ''), onclick: () => pick(x.id) }, x.short, x.again ? ' again' : ''),
         h('span', { class: 'trip-jobs' }, x.jobs.join(', ')),
         h('button', { type: 'button', class: 'trip-skip', title: 'Leave ' + x.short + ' out of this trip', 'aria-label': 'Leave ' + x.short + ' out of this trip', onclick: () => skip(x.id, true) }, '\u00d7')))) : null,
+      t.lost.length ? h('p', { class: 'note neg' }, 'No route from here to ' + t.lost.join(', ') + '.') : null,
       t.skipped.length || t.idle.length ? h('p', { class: 'note' },
         t.skipped.length ? ['Left out by you: ', t.skipped.map((x, i) => [i ? ', ' : '', h('button', { type: 'button', class: 'linkish', onclick: () => skip(x.id, false) }, x.short + ' (put back)')]), '. '] : null,
         t.idle.length ? 'Nothing to do in ' + t.idle.join(', ') + '. ' : null,
@@ -1325,6 +1340,28 @@
   }
   /** A change made here goes up a few seconds later, so a run of presses makes one write. */
   function syncSoon() { if (window.Sync && window.Sync.on) { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 3000); } }
+  /** In the Android app only: which things the phone should notify about. The app does the notifying, from the summary the page hands it. */
+  function notifyPanel(m) {
+    if (!E.native) return null;
+    const set = (kind, on) => {
+      S.notify = Object.assign({}, S.notify, { [kind]: on });
+      E.store.set('eveops.notify', S.notify);
+      E.ask('notify', { ask: on }).then(r => { S.notifyAllowed = !!r.allowed; paint(); }, () => { S.notifyAllowed = 'old'; paint(); });
+      if (on) setTimeout(() => E.ask('notify', {}).then(r => { S.notifyAllowed = !!r.allowed; paint(); }, () => {}), 8000);   // after Android's own question has been answered
+      paint();
+    };
+    const any = S.notify.change || S.notify.extractors || S.notify.launchpad;
+    const count = kind => m.alerts.filter(a => a.kind === kind).length;
+    const row = (kind, label, now) => h('label', { class: 'check' },
+      h('input', { type: 'checkbox', checked: S.notify[kind], onchange: e => set(kind, e.target.checked) }), h('span', null, label, h('span', { class: 'sub' }, now)));
+    return h('section', { class: 'panel panel-notify' }, h('h3', null, 'Phone notifications'),
+      row('change', 'An order loses the lead', count('change') ? plural(count('change'), 'order') + ' to change now' : 'none now'),
+      row('extractors', 'Extractors stop', count('extractors') ? plural(count('extractors'), 'colony', 'colonies') + ' stopped now' : 'all running'),
+      row('launchpad', 'A launchpad is nearly full', count('launchpad') ? plural(count('launchpad'), 'colony', 'colonies') + ' at 85% or more' : 'none now'),
+      any && S.notifyAllowed === false ? h('p', { class: 'note neg' }, 'Android is blocking notifications for Eve Ops. Allow them in the phone\u2019s settings for this app.') : null,
+      any && S.notifyAllowed === 'old' ? h('p', { class: 'note neg' }, 'This build of the app cannot notify. Install the newest Eve Ops APK.') : null,
+      h('p', { class: 'note' }, 'The app checks about every half hour while it is closed and tells you once about each new thing. Routine changes only: big moves, snipers and slow lines stay quiet.'));
+  }
   function syncPanel() {
     const Y = window.Sync;
     if (!Y) return null;
@@ -1498,7 +1535,7 @@
       topView(m),
       m ? h('main', { class: 'board' },
         h('div', { class: 'stops' }, m.stops.length ? [tripView(m), tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m), closesView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m), closesView(m)]),
-        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), syncPanel(), dataPanel()))
+        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), notifyPanel(m), syncPanel(), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);
   }
@@ -1529,6 +1566,7 @@
           list: sell ? sell.split.list : null, now: sell ? sell.split.now : null, hub: sell ? sell.hubs.reduce((a, b) => (b.list > a.list ? b : a)).name : '' } : null } : null,
       wh: window.Wh && window.Wh.summary ? window.Wh.summary() : null,
       problems: Object.keys(S.feeds).filter(n => S.feeds[n].err).length,
+      alerts: m.alerts, notify: S.notify,
     };
   }
   let shareTimer = 0;
@@ -1606,6 +1644,7 @@
     if (S.view === 'wh') paint();
     scout();
     syncNow();
+    if (E.native) E.ask('notify', {}).then(r => { S.notifyAllowed = !!r.allowed; }, () => { S.notifyAllowed = 'old'; });
     await run();
     let n = 0;
     setInterval(async () => {
