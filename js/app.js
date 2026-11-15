@@ -1482,14 +1482,24 @@
   }
   /** A change made here goes up a few seconds later, so a run of presses makes one write. */
   function syncSoon() { if (window.Sync && window.Sync.on) { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 3000); } }
+  /**
+   * Asks the app whether Android lets it post notifications, and with `ask` has Android put its own question to the owner
+   * (Android shows that question at most twice; after two refusals only the phone's settings can turn them on).
+   * A build of the app from before notifications does not answer at all.
+   */
+  function notifyState(ask) {
+    if (!E.native) return;
+    E.ask('notify', ask ? { ask: true } : {}).then(r => { S.notifyAllowed = typeof r.allowed === 'boolean' ? r.allowed : 'old'; S.notifySettings = !!r.settings; paint(); },
+      () => { S.notifyAllowed = 'old'; paint(); });
+  }
   /** In the Android app only: which things the phone should notify about. The app does the notifying, from the summary the page hands it. */
   function notifyPanel(m) {
     if (!E.native) return null;
+    const askAndroid = () => { notifyState(true); setTimeout(() => notifyState(false), 4000); setTimeout(() => notifyState(false), 12000); };   // look again once Android's question has been answered
     const set = (kind, on) => {
       S.notify = Object.assign({}, S.notify, { [kind]: on });
       E.store.set('eveops.notify', S.notify);
-      E.ask('notify', { ask: on }).then(r => { S.notifyAllowed = !!r.allowed; paint(); }, () => { S.notifyAllowed = 'old'; paint(); });
-      if (on) setTimeout(() => E.ask('notify', {}).then(r => { S.notifyAllowed = !!r.allowed; paint(); }, () => {}), 8000);   // after Android's own question has been answered
+      if (on) askAndroid(); else notifyState(false);
       paint();
     };
     const any = S.notify.change || S.notify.extractors || S.notify.launchpad;
@@ -1500,7 +1510,13 @@
       row('change', 'An order loses the lead', count('change') ? plural(count('change'), 'order') + ' to change now' : 'none now'),
       row('extractors', 'Extractors stop', count('extractors') ? plural(count('extractors'), 'colony', 'colonies') + ' stopped now' : 'all running'),
       row('launchpad', 'A launchpad is nearly full', count('launchpad') ? plural(count('launchpad'), 'colony', 'colonies') + ' at 85% or more' : 'none now'),
-      any && S.notifyAllowed === false ? h('p', { class: 'note neg' }, 'Android is blocking notifications for Eve Ops. Allow them in the phone\u2019s settings for this app.') : null,
+      any && S.notifyAllowed === true ? h('p', { class: 'note' }, h('span', { class: 'best' }, 'Android allows notifications from Eve Ops.')) : null,
+      any && S.notifyAllowed === false ? [
+        h('p', { class: 'note neg' }, 'Android has not allowed notifications from Eve Ops yet.'),
+        h('div', { class: 'tools' },
+          h('button', { type: 'button', class: 'btn', onclick: askAndroid }, 'Ask Android to allow them'),
+          S.notifySettings ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => E.tell('notify-settings', {}) }, 'Open Android\u2019s settings for Eve Ops') : null),
+        h('p', { class: 'note' }, 'Android should show its own question, "Allow Eve Ops to send you notifications?". If nothing appears, turn them on by hand: press and hold the Eve Ops icon on the home screen, choose App info, then Notifications. The phone\u2019s general list of notifying apps may not show Eve Ops until then.')] : null,
       any && S.notifyAllowed === 'old' ? h('p', { class: 'note neg' }, 'This build of the app cannot notify. Install the newest Eve Ops APK.') : null,
       h('p', { class: 'note' }, 'The app checks about every half hour while it is closed and tells you once about each new thing. Routine changes only: big moves, snipers and slow lines stay quiet.'));
   }
@@ -1787,7 +1803,7 @@
     if (S.view === 'wh') paint();
     scout();
     syncNow();
-    if (E.native) E.ask('notify', {}).then(r => { S.notifyAllowed = !!r.allowed; }, () => { S.notifyAllowed = 'old'; });
+    notifyState(S.notify.change || S.notify.extractors || S.notify.launchpad);     // a notification is wanted: let Android ask if it has not been allowed yet
     await run();
     let n = 0;
     setInterval(async () => {
@@ -1801,7 +1817,7 @@
       if (n % 4 === 0) { syncNow(); return run(); }           // once a minute: fetch whatever EVE has republished, and what the other devices changed
       try { if (await loadLocation()) { await loadRoutes(); paint(); } } catch (err) { /* next tick */ }
     }, 15000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { wake(); syncNow(); run(); } });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { wake(); syncNow(); notifyState(false); run(); } });
   }
   boot();
 })();

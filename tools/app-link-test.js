@@ -9,7 +9,7 @@ const fakeApp = signedIn => `
   window.EveOpsNative = { onmessage: null, postMessage(text) {
     const m = JSON.parse(text); window.__sent.push(m);
     const reply = r => setTimeout(() => this.onmessage({ data: JSON.stringify(Object.assign({ rpc: m.rpc }, r)) }), 5);
-    if (m.op === 'notify') reply({ allowed: true });
+    if (m.op === 'notify') { if (m.ask) window.__allowAt = Date.now() + 1500; reply({ allowed: !!window.__allowAt && Date.now() >= window.__allowAt, settings: true }); }
     if (m.op === 'who') reply({ slots: ${signedIn ? "{ '': { id: 92279686, name: 'Test Trader', scopes: [] } }" : '{}'} });
     if (m.op === 'token') reply({ ok: true, access: 'TOKEN-FROM-APP-' + (m.slot || 'trader'), exp: Date.now() + 600000, id: 92279686, name: 'Test Trader', scopes: [] });
   } };`;
@@ -42,6 +42,15 @@ const check = (label, ok, detail) => { if (!ok) failed++; console.log((ok ? 'ok 
   await page.waitForTimeout(1800);
   const after = await page.evaluate(() => ({ asked: window.__sent.filter(m => m.op === 'notify' && m.ask === true).length, snaps: window.__sent.filter(m => m.op === 'snapshot') }));
   check('turning a notification on asks the app for permission and reaches it in the next summary', after.asked === 1 && after.snaps[after.snaps.length - 1].data.notify.change === true);
+  const waiting = await page.locator('.panel-notify').innerText();
+  check('while Android has not allowed them the panel says so and offers to ask again and to open the settings', /has not allowed notifications/.test(waiting) && /Ask Android to allow them/.test(waiting) && /Open Android.s settings for Eve Ops/.test(waiting) && /App info, then Notifications/.test(waiting), waiting.slice(0, 200));
+  await page.waitForTimeout(3200);
+  const granted = await page.locator('.panel-notify').innerText();
+  check('once Android allows them the warning goes without another press', /Android allows notifications from Eve Ops/.test(granted) && !/has not allowed/.test(granted), granted.slice(0, 200));
+  await page.reload({ waitUntil: 'networkidle' }); await page.waitForTimeout(1500);
+  const again = await page.evaluate(() => window.__sent.filter(m => m.op === 'notify').map(m => !!m.ask));
+  check('on the next start, with a notification wanted, the app is asked to prompt again', again[0] === true, JSON.stringify(again));
+
   await page.click('.price >> nth=0').catch(() => {});
   check('a price tap copies through the app', (await page.evaluate(() => window.__sent.filter(m => m.op === 'copy').length)) === 1);
   await page.close();
