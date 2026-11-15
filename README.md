@@ -20,7 +20,7 @@ Note that every site under `clockwerks77.github.io` shares the same browser stor
 
 - **Position** of each sell order among sell orders in the same station, and of each buy order among bids that can be filled at its station (range is checked).
 - **Price to type**: one legal step under the front of the book (sells) or over the top bid (buys). EVE prices carry four significant figures, so the step is 1,000 ISK above 1M, 100 ISK above 100k, and so on.
-- **Call**: Change, Optional (a sniper of a few units), Hold (the front is below your cost, or at or below the Jita sell price), Leading. Two orders for the same item in one station are always given the same price, and each is named by its size.
+- **Call**: Change (a routine step), Big move (the front is more than 2% away from your price: dump or repricing is your call), Sniper (a few units just under you), Hold (the front is below your cost, or at or below the Jita sell price), Leading. Two orders for the same item in one station are always given the same price, and each is named by its size.
 - **Net each**: `price × (1 − broker − sales tax) − cost`. Cost is first-in first-out over the wallet transactions EVE still returns (about six weeks), so it is an estimate. The tracker workbook stays the ledger of record.
 - **Hub tabs**: one tab per hub with open orders, nearest first. The tab for the hub you dock in (or fly into) selects itself; picking another tab by hand holds until you move again.
 - **Routes**: shortest and secure, one square per system coloured by security status, a red cap where ships or pods were lost in the last hour (`ship/pod` counts listed beside it).
@@ -45,7 +45,7 @@ Your own orders are matched by ID inside the market book, so a price change show
 
 ## Settings
 
-`js/config.js` holds the fees (broker 1.5%, sales tax 3.375%, 0.39% per price change), the sniper threshold, the slow-line threshold, and the item types left out of trading math.
+`js/config.js` holds the fees (broker 1.5%, sales tax 3.375%, 0.39% per price change), the sniper and big-move thresholds, the slow-line threshold, and the item types left out of trading math.
 
 ## Files
 

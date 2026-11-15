@@ -34,6 +34,9 @@ window.EVEOPS_CONFIG = {
 
   // An undercut of this many units or fewer is a sniper: the price is offered, not urged.
   sniperUnits: 5,
+  // A price change bigger than this share of your price is flagged "Big move" for you to judge
+  // (dump or repricing?) instead of being listed as a routine change.
+  bigMove: 0.02,
   // A line with no sale for this many days is listed under "Slow lines".
   staleDays: 14,
 

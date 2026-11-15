@@ -110,7 +110,8 @@
     const pair = await Promise.all([E.get(me() + '/location/', { auth: true }), E.get(me() + '/ship/', { auth: true })]);
     const a = S.loc || {}, b = pair[0].data;
     const moved = !S.loc || a.station_id !== b.station_id || a.structure_id !== b.structure_id || a.solar_system_id !== b.solar_system_id;
-    S.loc = b; S.ship = pair[1].data; feed('Location', pair[0]);
+    S.loc = b; S.ship = pair[1].data;
+    S.feeds.Location = { at: pair[0].fetched, next: 0, err: null }; // when it was last checked, not when it last changed
     if (moved) {
       S.follow = true; // show the hub they have just arrived at
       await Promise.all([
@@ -298,7 +299,7 @@
       const c = costOf(o0.type_id);
       const cost = c ? c.cost : null;
       const plan = g.every(x => x.pos)
-        ? L.planSells(g, { cost, jitaSell: jitaSell(o0.type_id), isJita: o0.location_id === C.jita.station, netMult: NET, modify: C.fees.modify, sniperUnits: C.sniperUnits })
+        ? L.planSells(g, { cost, jitaSell: jitaSell(o0.type_id), isJita: o0.location_id === C.jita.station, netMult: NET, modify: C.fees.modify, sniperUnits: C.sniperUnits, bigMove: C.bigMove })
         : new Map();
       const v = vel.get(o0.type_id + ':' + o0.location_id) || { d1: 0, d7: 0, last: 0 };
       let left = 0;
@@ -320,7 +321,8 @@
       const lastBuy = led.lastBuy.get(o0.type_id) || 0;
       const quiet = windowDays >= C.staleDays && now - v.last > C.staleDays * D && now - lastBuy > C.staleDays * D;
       const clear = v.d7 > 0 ? left / (v.d7 / 7) : null;
-      if (left > 0 && (quiet || (clear != null && clear > 30))) slow.push({ type: o0.type_id, name: nameOf(o0.type_id), stop: o0.location_id, left, last: v.last, clear, quiet });
+      const settled = now - lastBuy > 7 * D;
+      if (left > 0 && (quiet || (settled && clear != null && clear > 30))) slow.push({ type: o0.type_id, name: nameOf(o0.type_id), stop: o0.location_id, left, last: v.last, clear, quiet });
     }
     slow.sort((a, b) => (b.quiet - a.quiet) || ((b.clear || 1e9) - (a.clear || 1e9)));
 
@@ -335,7 +337,7 @@
         id: o.order_id, type: o.type_id, name: nameOf(o.type_id), price, remain: pos ? pos.remain : o.volume_remain,
         total: o.volume_total, pos, escrow: o.escrow || 0, days: o.duration,
         expires: Date.parse(o.issued) + o.duration * D,
-        plan: pos ? L.planBid(pos, { broker: C.fees.broker, modify: C.fees.modify }) : { action: 'wait', reason: 'Waiting for the market book.', target: null },
+        plan: pos ? L.planBid(pos, { broker: C.fees.broker, modify: C.fees.modify, bigMove: C.bigMove }) : { action: 'wait', reason: 'Waiting for the market book.', target: null },
         pin: pinOf(o.order_id, price),
       });
     }
@@ -412,6 +414,7 @@
       days: L.daily(led.sales, 14, now), windowDays,
       planets: S.planets.slice().sort((a, b) => (a.expiry == null ? Infinity : a.expiry) - (b.expiry == null ? Infinity : b.expiry)),
       queue: queue.map(q => ({ name: nameOf(q.skill_id), level: q.finished_level, done: Date.parse(q.finish_date) })),
+      paused: S.queue.filter(q => !q.finish_date).sort((a, b) => a.queue_position - b.queue_position).map(q => ({ name: nameOf(q.skill_id), level: q.finished_level })),
       clone: S.clones ? { ready: lastJump ? lastJump + (24 - lv(SKILL.infomorph)) * H : 0, at: (S.clones.jump_clones || []).map(j => { const st = K.stations[j.location_id]; const sy = st && K.systems[st.system]; return sy ? sy.name : st ? st.name.split(' ')[0] : null; }).filter(Boolean) } : null,
     };
   }
@@ -452,8 +455,9 @@
     }
     const done = r.pin && r.pin.done;
     const lead = r.pos && r.pos.status === 'leading';
-    const label = { tick: 'Change', optional: 'Optional', wait: 'Loading', none: 'Gone', hold: lead ? (kind === 'sell' ? 'Leading' : 'Top bid') : 'Hold' }[r.plan.action];
-    const cls = { tick: 'chip-go', optional: 'chip-opt', wait: 'chip-wait', none: 'chip-gone', hold: lead ? 'chip-lead' : 'chip-hold' }[r.plan.action];
+    const big = r.plan.kind === 'big';
+    const label = { tick: 'Change', optional: big ? 'Big move' : 'Sniper', wait: 'Loading', none: 'Gone', hold: lead ? (kind === 'sell' ? 'Leading' : 'Top bid') : 'Hold' }[r.plan.action];
+    const cls = { tick: 'chip-go', optional: big ? 'chip-big' : 'chip-opt', wait: 'chip-wait', none: 'chip-gone', hold: lead ? 'chip-lead' : 'chip-hold' }[r.plan.action];
     const depthShown = r.pos && r.plan.action === 'tick' && r.plan.kind !== 'mismatch' && (r.pos.status === 'undercut' || r.pos.status === 'behind' || r.pos.status === 'outbid');
     const why = r.plan.action === 'hold' && lead ? null
       : r.plan.action === 'tick' ? (depthShown ? '' : r.plan.reason + ' ') + (r.plan.fee ? 'Changing costs ' + L.short(r.plan.fee) + '.' : '')
@@ -524,7 +528,7 @@
     const pinnable = s.sells.concat(s.bids).filter(r => r.plan.action === 'tick' && r.plan.target != null && !(r.pin && !r.pin.done));
     const summary = [];
     if (s.change) summary.push(s.change + ' to change');
-    if (s.optional) summary.push(s.optional + ' optional');
+    if (s.optional) summary.push(s.optional + ' your call');
     if (!s.change && !s.optional) summary.push('Nothing to change');
     return h('section', { class: 'stop' + (s.docked ? ' is-here' : ''), id: 'stop-' + s.id, role: 'tabpanel', 'aria-label': s.short },
       h('header', { class: 'stop-head' },
@@ -619,6 +623,10 @@
         h('span', { class: 't-what' }, x.name + ' ' + roman[x.level], h('span', { class: 'sub' }, i === 0 ? 'training now' : 'queued')),
         h('span', { class: 't-when' }, 'Done ', live('until', x.done), h('span', { class: 'sub' }, clock(x.done)))))),
         h('p', { class: 'note' }, (q.length > 6 ? plural(q.length - 6, 'more skill') + ' after these. ' : '') + 'Queue ends ' + new Date(q[q.length - 1].done).toLocaleString('en-CA', { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '.')]
+        : m.paused.length ? [h('ul', { class: 'timers' }, m.paused.slice(0, 6).map(x => h('li', null,
+            h('span', { class: 't-what' }, x.name + ' ' + roman[x.level], h('span', { class: 'sub' }, 'queued')),
+            h('span', { class: 't-when' }, 'Paused')))),
+          h('p', { class: 'note' }, 'This character is not training. ' + plural(m.paused.length, 'skill') + ' in the queue, paused.')]
         : h('ul', { class: 'timers' }, h('li', { class: S.skills ? 'is-soon' : '' }, h('span', { class: 't-what' }, 'Nothing training'), h('span', { class: 't-when' }, S.skills ? 'Queue is empty' : 'Loading'))));
   }
   function clonePanel(m) {

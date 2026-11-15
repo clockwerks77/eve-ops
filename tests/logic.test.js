@@ -64,7 +64,7 @@ test('sell position: the newer source wins, and a missing order is flagged', () 
   assert.notEqual(L.sellPosition(listed, [sell(2, 1400000, 1)], new Set([1]), false).status, 'gone');
 });
 
-const ctx = { cost: 1100000, jitaSell: 1150000, isJita: false, netMult: 0.95125, modify: 0.0039, sniperUnits: 5 };
+const ctx = { cost: 1100000, jitaSell: 1150000, isJita: false, netMult: 0.95125, modify: 0.0039, sniperUnits: 5, bigMove: 0.02 };
 const grp = (orders, book) => { const ids = new Set(orders.map(o => o.order_id)); return orders.map(order => ({ order, pos: L.sellPosition(order, book, ids, true) })); };
 
 test('sell call: tick one legal step under the front', () => {
@@ -105,6 +105,23 @@ test('sell call: hold against dumps and Jita-level fronts, flag snipers', () => 
   assert.equal(unknownCost.net, null);
 });
 
+test('sell call: a front far below you is flagged as a big move, not a routine change', () => {
+  // seen live: 328,800 against a front of 250,000 that is still above cost and above Jita
+  const mine = sell(1, 328800, 200);
+  const c = Object.assign({}, ctx, { cost: 208000, jitaSell: 232000 });
+  const plan = L.planSells(grp([mine], [mine, sell(2, 250000, 86)]), c).get(1);
+  assert.equal(plan.action, 'optional');
+  assert.equal(plan.kind, 'big');
+  assert.equal(plan.target, 249900);
+  assert.match(plan.reason, /24% under you/);
+  // 0.5% under is routine
+  const near = L.planSells(grp([mine], [mine, sell(2, 327200, 86)]), c).get(1);
+  assert.equal(near.action, 'tick');
+  // a dump below cost still wins over "big move"
+  const dump = L.planSells(grp([mine], [mine, sell(2, 215000, 86)]), c).get(1);
+  assert.equal(dump.action, 'hold');
+});
+
 test('buy position and bid call', () => {
   const mine = buy(1, 578500, 40);
   const book = [mine, buy(2, 579700, 43), buy(3, 579600, 162), buy(4, 579400, 708), buy(5, 600000, 10, null, 'station', 60003469), buy(6, 500000, 5)];
@@ -114,12 +131,16 @@ test('buy position and bid call', () => {
   assert.equal(p.wall, 579700);
   assert.equal(p.unitsOver, 913);
   assert.deepEqual(p.over.map(l => l.price), [579700, 579600, 579400]);
-  const plan = L.planBid(p, { broker: 0.015, modify: 0.0039 });
+  const plan = L.planBid(p, { broker: 0.015, modify: 0.0039, bigMove: 0.02 });
   assert.equal(plan.action, 'tick');
   assert.equal(plan.target, 579800);
   assert.equal(plan.escrowAdd, (579800 - 578500) * 40);
+  const far = L.planBid(L.buyPosition(buy(1, 500000, 40), [buy(1, 500000, 40)].concat(book.slice(1)), new Set([1]), true, reaches), { broker: 0.015, modify: 0.0039, bigMove: 0.02 });
+  assert.equal(far.action, 'optional');
+  assert.equal(far.kind, 'big');
+  assert.equal(far.target, 579800); // the 600,000 bid in another station does not reach Jita 4-4
   const top = buy(1, 580000, 40);
-  assert.equal(L.planBid(L.buyPosition(top, [top].concat(book.slice(1)), new Set([1]), true, reaches), { broker: 0.015, modify: 0.0039 }).action, 'hold');
+  assert.equal(L.planBid(L.buyPosition(top, [top].concat(book.slice(1)), new Set([1]), true, reaches), { broker: 0.015, modify: 0.0039, bigMove: 0.02 }).action, 'hold');
 });
 
 test('ledger: FIFO cost, uncovered units, zero-cost and excluded types', () => {

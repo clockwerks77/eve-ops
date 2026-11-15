@@ -142,6 +142,7 @@ button { font: inherit; color: inherit; }
 .chip::before { content: ""; display: inline-block; width: 0.55rem; height: 0.55rem; margin-right: 0.4rem; background: currentColor; }
 .chip-go { color: var(--warn); }
 .chip-opt { color: var(--dim); }
+.chip-big { color: var(--isk); }
 .chip-hold { color: var(--calm); }
 .chip-lead, .chip-done { color: var(--lead); }
 .chip-pin { color: var(--isk); }

@@ -97,9 +97,10 @@
   // ----------------------------------------------------------------- calls
   /**
    * Decide what to do with every sell order I have for one item in one station.
-   * group: [{ order, pos }]   ctx: { cost, jitaSell, isJita, netMult, modify, sniperUnits }
-   * Returns a Map order_id -> { action, reason, target, fee, net, margin }
+   * group: [{ order, pos }]   ctx: { cost, jitaSell, isJita, netMult, modify, sniperUnits, bigMove }
+   * Returns a Map order_id -> { action, kind, reason, target, fee, net, margin }
    *   action: 'hold' | 'tick' | 'optional' | 'none'
+   *   kind (for 'optional'): 'big' = the front sits far below you, 'sniper' = a few units just under
    */
   function planSells(group, ctx) {
     const out = new Map();
@@ -125,18 +126,20 @@
       const front = lead.pos.front;
       const target = tickBelow(front);
       const units = lead.pos.ahead;
-      let action = 'tick';
+      const drop = (lead.pos.price - target) / lead.pos.price;
+      let action = 'tick', kind = null;
       let reason = lead.pos.status === 'behind'
         ? units.toLocaleString('en-US') + ' older units at your price'
         : units.toLocaleString('en-US') + (units === 1 ? ' unit' : ' units') + ' under you';
       if (ctx.cost != null && front * ctx.netMult <= ctx.cost) { action = 'hold'; reason = 'Front is below your cost. Dump, let it drain.'; }
       else if (ctx.cost != null && target * ctx.netMult <= ctx.cost) { action = 'hold'; reason = 'One tick under would sell below cost.'; }
       else if (!ctx.isJita && ctx.jitaSell != null && front <= ctx.jitaSell) { action = 'hold'; reason = 'Front is at or below the Jita sell price.'; }
-      else if (units <= ctx.sniperUnits) { action = 'optional'; reason = 'Sniper: ' + reason + '.'; }
+      else if (drop > ctx.bigMove) { action = 'optional'; kind = 'big'; reason = 'Front is ' + Math.round(drop * 1000) / 10 + '% under you. Dump or repricing: your call.'; }
+      else if (units <= ctx.sniperUnits) { action = 'optional'; kind = 'sniper'; reason = 'Sniper: ' + reason + '.'; }
       for (const g of live) {
         if (action === 'hold') out.set(g.order.order_id, holdAt(g, reason));
         else if (g.pos.price <= target) out.set(g.order.order_id, holdAt(g, 'Already under the front.'));
-        else out.set(g.order.order_id, Object.assign({ action, reason }, money(target, g)));
+        else out.set(g.order.order_id, Object.assign({ action, kind, reason }, money(target, g)));
       }
       return out;
     }
@@ -151,16 +154,20 @@
     return out;
   }
 
-  /** ctx: { broker, modify } */
+  /** ctx: { broker, modify, bigMove } */
   function planBid(pos, ctx) {
     if (pos.status === 'gone') return { action: 'none', reason: 'Not in the market book. Filled, cancelled or expired.', target: null };
     if (pos.status === 'leading') return { action: 'hold', reason: 'Top bid.', target: null, fee: 0 };
     const target = tickAbove(pos.wall);
     const added = (target - pos.price) * pos.remain;
     const units = pos.ahead;
+    const rise = (target - pos.price) / pos.price;
+    const big = rise > ctx.bigMove;
     return {
-      action: 'tick',
-      reason: pos.status === 'behind'
+      action: big ? 'optional' : 'tick',
+      kind: big ? 'big' : null,
+      reason: big ? 'Top bid is ' + Math.round(rise * 1000) / 10 + '% above yours. Check the margin before you bump.'
+        : pos.status === 'behind'
         ? units.toLocaleString('en-US') + ' older units at your price'
         : units.toLocaleString('en-US') + (units === 1 ? ' unit' : ' units') + ' bid above you',
       target,
