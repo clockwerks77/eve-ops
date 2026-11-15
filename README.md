@@ -64,6 +64,7 @@ How it fits together:
 - The app loads the live page, so a change to the page reaches the app without a new APK. Only changes under `android/` need one.
 - **Sign-in** opens EVE's login in the phone's own browser. EVE sends the browser back to this page, which hands the one-time code to the app (`eveops://auth`). The app keeps the sign-in in its private storage, excluded from backups, and gives the page short-lived access tokens when it asks. The page inside the app never holds the refresh token.
 - **Widgets** show a summary that the page itself works out and hands to the app, so a widget can never disagree with the board. While the app is closed, the app loads the page off screen about every half hour (as often as Android allows a background app) and on a tap of a widget's refresh arrow. Each widget says when its figures are from.
+- **Text follows the widget's size.** For each size a widget is shown at, the app shows as many whole lines as fit and draws them as large as that size allows (`Fit` in `Faces.kt`). Resizing a widget redraws it. Lower lines drop first on a small widget.
 - A tap on a widget opens the matching view.
 
 Getting the APK: GitHub builds it (`.github/workflows/android.yml`). Every push under `android/` is compiled, unit-tested and run on an emulator against the sample data. A release with the APK attached is published when a commit changes `android/RELEASE` (put the next number in it), or from the Actions tab: *Android app* → *Run workflow*.
@@ -103,7 +104,13 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
 - `js/demo.js` — sample data behind `#demo`
 - `js/wh.js`, `js/whdata.js` — the Wormholes tab and its table of statics, effects and wormhole types
 - `tests/logic.test.js` — run with `node --test tests/logic.test.js`
-- `android/` — the Android app: `Auth.kt` (sign-in), `Bridge.kt` (link to the page), `Refresh.kt` (background refresh), `Faces.kt` (what each widget says; unit-tested), `Widgets.kt`
+- `android/` — the Android app: `Auth.kt` (sign-in), `Bridge.kt` (link to the page), `Refresh.kt` (background refresh), `Faces.kt` (what each widget says and how its text fits; unit-tested), `Widgets.kt`
+- `tools/` — checks to run before a push:
+  - `node tools/render.js <folder>` draws the sample data at monitor, tablet and phone size and reports page errors or sideways overflow
+  - `node tools/app-link-test.js` checks the page's side of the Android app link with a stand-in for the app (give it a file name to rewrite the Android test fixture `android/app/src/test/resources/snapshot-demo.json`)
+  - `tools/ci.sh [commit]` waits for GitHub's Android build and emulator run and prints what they reported
+  - `tools/screens.sh <folder>` fetches the emulator screenshots
+  - `tools/whdata.py` rebuilds `js/whdata.js` from Wanderer's data files
 
 The page sets a content security policy that allows requests only to `esi.evetech.net`, `login.eveonline.com`, `zkillboard.com` and the page's own address, and scripts only from this repository.
 
