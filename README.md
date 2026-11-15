@@ -53,6 +53,8 @@ Wormhole statics, effects and wormhole types in `js/whdata.js` are derived from 
 
 `android/` holds a small Android app (Android 12 or newer). It shows this same page full screen and adds three home-screen widgets:
 
+![The app and its three widgets, on sample data](docs/android.png)
+
 - **Trading**: overall wealth, how many orders to change, check or judge, which hubs they are at, wallet, ISK in buy orders and on sale, the week's net.
 - **Planetary Interaction**: what is waiting on the planets, whether a pickup is worth it, when extractors stop or have stopped.
 - **Wormholes**: where the wormhole pilot is, the system's class, effect and statics, kills there, and the loot to hand over.
