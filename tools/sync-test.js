@@ -78,6 +78,15 @@ const { serve, playwright, chrome } = require('./serve.js');
   ok('pins made on the PC show on the phone', await phone.locator('.chip-pin').count() > 0);
   ok('the tracker figure typed on the PC shows on the phone', await phone.locator('.closes-table tbody tr').nth(1).locator('.isk-in').inputValue() === '18,200,000');
 
+  // the tracker's costs travel too
+  await pc.click('text=Paste rows from the tracker');
+  await pc.locator('.costs-text').fill('Item\tVenue\tUnit Cost\nSmall Shield Extender II\tRens\t401,500');
+  await pc.click('text=Read these rows');
+  await pc.waitForTimeout(4600);
+  await syncNow(phone);
+  ok('tracker costs pasted on the PC reach the phone, and its weekly figures use them', /1 row, 1 item/.test(await phone.locator('.closes-costs').innerText())
+    && /at tracker cost/.test(await phone.locator('.closes-table tbody tr').first().innerText()));
+
   // quiet when nothing changes; clear about failures
   const writes = log.filter(x => x.method === 'PATCH').length;
   await syncNow(pc); await syncNow(pc);

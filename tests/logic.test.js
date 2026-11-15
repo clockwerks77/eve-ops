@@ -458,9 +458,73 @@ test('sync: two devices joined either way round end the same, and joining again 
   assert.equal(ab.seen.at, now - 3 * H);
   // the week keeps the figures fixed first, gains the journal figures, and keeps the tracker entry
   assert.deepEqual(ab.weeks.w['2026-11-02'], { gross: 10, units: 1, net: 5, uncovered: 0, frozenAt: now - 50, fees: -1, change: 2, close: 3, tracker: { v: 5, at: now - 10 } });
+  // costs travel (the newer import wins), and a week worked out again on newer costs replaces the figures fixed earlier
+  const withCosts = Object.assign({}, phone, { costs: { at: now - 5, rows: [{ t: 519, l: null, d: null, c: 800000 }] },
+    weeks: { carried: null, w: { '2026-11-02': { gross: 10, units: 1, net: 7, uncovered: 0, borrowed: 1, basis: now - 5, frozenAt: now - 1 } } } });
+  const c1 = L.syncMerge(pc, withCosts, now, keep), c2 = L.syncMerge(withCosts, pc, now, keep);
+  assert.equal(L.stable(c1), L.stable(c2));
+  assert.equal(c1.costs.rows[0].c, 800000);
+  assert.equal(c1.weeks.w['2026-11-02'].net, 7); assert.equal(c1.weeks.w['2026-11-02'].basis, now - 5);
+  assert.deepEqual(c1.weeks.w['2026-11-02'].tracker, { v: 5, at: now - 10 });
   assert.deepEqual(ab.weeks.w['2026-11-09'], { escrow: 9, wallet: 10, seenAt: now - 100 });
   assert.deepEqual(ab.weeks.carried, { v: 1e9, at: now - 100 });
   // an empty sync file takes everything from the device
   assert.equal(L.stable(L.syncMerge(ab, { v: 1 }, now, keep)), L.stable(ab));
   assert.equal(L.stable({ b: 1, a: [2, { d: 1, c: undefined }] }), '{"a":[2,{"d":1}],"b":1}');
+});
+
+test('tracker costs: rows pasted from the Order Tracking sheet, with and without the header row', () => {
+  const header = 'Date Listed\tItem\tVenue\tQty Listed\tUnit Cost\tList Price\tRelists\tQty Sold\tAvg Realized\tDate Sold Out\tDays on Market\tStatus\tRealized Net (approx)';
+  const body = [
+    '2026-09-01\tGyrostabilizer II\tRens\t25\t803,963\t968,000\t0\t25\t968,000\t2026-09-01\t0\tOK\t2,921,438',
+    '2026-09-01\tGyrostabilizer II\tHek\t15\t803,963\t977,000\t0\t15\t977,000\t2026-09-01\t0\tOK\t1,881,263',
+    '2026-10-20\tBiocells (PI)\tHek\t1,400\t0\t9,150\t0\t1,400\t9,150\t\t\tOK\t12,185,513',
+    '',
+    '\tNotes: relisted after the dump\t\t\t\t',
+    'Running total\t\t\t\t\t\t\t\t\t\t\t\t16,988,214',
+  ].join('\n');
+  const p = L.parseCosts(header + '\n' + body);
+  assert.equal(p.rows.length, 3); assert.equal(p.skipped, 2);
+  assert.deepEqual(p.rows[0], { name: 'Gyrostabilizer II', venue: 'Rens', date: new Date(2026, 8, 1).getTime(), qty: 25, cost: 803963 });
+  assert.equal(p.rows[2].cost, 0); assert.equal(p.rows[2].qty, 1400);
+  assert.equal(p.net, 2921438 + 1881263 + 12185513);
+  // no header: the sheet's usual column order
+  assert.deepEqual(L.parseCosts(body).rows.map(r => r.name), ['Gyrostabilizer II', 'Gyrostabilizer II', 'Biocells']);
+  // columns in another order are found by their headers; a sheet without Realized Net gives no total
+  const moved = L.parseCosts('Item\tUnit Cost\tVenue\nDamage Control II\t1.2M\tAmarr');
+  assert.deepEqual(moved.rows, [{ name: 'Damage Control II', venue: 'Amarr', date: null, qty: null, cost: 1200000 }]);
+  assert.equal(moved.net, null);
+  assert.deepEqual(L.parseCosts('').rows, []);
+});
+
+test('tracker costs fill in only where the wallet has no purchase', () => {
+  const day = d => new Date(Date.UTC(2026, 10, d)).toISOString();
+  const tx = [
+    { transaction_id: 1, date: day(2), type_id: 519, location_id: 9, quantity: 10, unit_price: 800000, is_buy: true },
+    { transaction_id: 2, date: day(5), type_id: 519, location_id: 7, quantity: 14, unit_price: 1000000, is_buy: false },     // 10 from the wallet, 4 from the tracker
+    { transaction_id: 3, date: day(6), type_id: 2048, location_id: 7, quantity: 5, unit_price: 1500000, is_buy: false },      // tracker only
+    { transaction_id: 4, date: day(6), type_id: 380, location_id: 7, quantity: 3, unit_price: 500000, is_buy: false },        // nobody knows
+  ];
+  const rows = [
+    { t: 519, l: 8, d: Date.UTC(2026, 9, 1), c: 700000 }, { t: 519, l: 7, d: Date.UTC(2026, 9, 1), c: 750000 }, { t: 519, l: 7, d: Date.UTC(2026, 10, 20), c: 990000 },
+    { t: 2048, l: null, d: null, c: 1200000 },
+  ];
+  const look = L.costLookup(rows);
+  assert.equal(look(519, 7, Date.UTC(2026, 10, 5)), 750000);     // same station, latest listed before the sale
+  assert.equal(look(519, 7, Date.UTC(2026, 10, 25)), 990000);
+  assert.equal(look(519, 3, Date.UTC(2026, 10, 5)), 750000);     // no row for that station: any station's
+  assert.equal(look(519, 7, Date.UTC(2026, 8, 1)), 750000);      // sold before any row was listed: the earliest
+  assert.equal(look(380, 7, 0), null);
+  const opts = { netMult: 0.95, exclude: new Set(), zeroCost: new Set() };
+  const plain = L.summarize(L.ledger(tx, opts).sales, 0, Infinity);
+  assert.equal(plain.uncovered, 4 + 5 + 3); assert.equal(plain.borrowed, 0);
+  const led = L.ledger(tx, Object.assign({ fallback: look }, opts)), sum = L.summarize(led.sales, 0, Infinity);
+  assert.equal(sum.uncovered, 3); assert.equal(sum.borrowed, 4 + 5);
+  assert.equal(led.sales[0].cost, 10 * 800000 + 4 * 750000);
+  assert.equal(Math.round(sum.net), Math.round(14 * 1000000 * 0.95 - (10 * 800000 + 4 * 750000) + 5 * 1500000 * 0.95 - 5 * 1200000));
+  // the other setting: the tracker's cost for every unit of an item it lists
+  const t2 = L.ledger(tx, Object.assign({ fallback: look, prefer: 'tracker' }, opts));
+  assert.equal(t2.sales[0].cost, 14 * 750000); assert.equal(t2.sales[0].borrowed, 14);
+  assert.equal(t2.lots.get(519).length, 0);                      // the wallet's lot is still used up
+  assert.equal(L.summarize(t2.sales, 0, Infinity).uncovered, 3);
 });

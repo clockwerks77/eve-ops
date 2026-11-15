@@ -56,6 +56,9 @@ window.EVEOPS_CONFIG = {
   // A price change bigger than this share of your price is flagged "Big move" for you to judge
   // (dump or repricing?) instead of being listed as a routine change.
   bigMove: 0.02,
+  // Cost of what you sell: 'wallet' takes what the wallet shows you paid (first in, first out) and falls back to the tracker's
+  // pasted unit costs only for units the wallet has no purchase for. 'tracker' takes the tracker's unit cost for every item it lists.
+  costs: { prefer: 'wallet' },
   // Weekly close: a week ties out when the page's net is within this share of the figure typed in from the tracker.
   // After `weeks` tied weeks in a row the page says it can take over as the ledger.
   tieOut: { within: 0.02, weeks: 2 },

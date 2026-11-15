@@ -199,19 +199,29 @@
         lastBuy.set(t.type_id, when);
         continue;
       }
-      let need = t.quantity, cost = 0, covered = 0;
+      let need = t.quantity, cost = 0, covered = 0, borrowed = 0;
       if (zero.has(t.type_id)) { covered = need; need = 0; }
+      // opts.prefer 'tracker': the tracker's cost for every unit of an item it lists; the wallet's lots are still used up, to stay in step
+      const first = need > 0 && opts.prefer === 'tracker' && opts.fallback ? opts.fallback(t.type_id, t.location_id, when) : null;
+      if (first != null) { cost = need * first; covered = borrowed = need; }
       const q = lots.get(t.type_id) || [];
       while (need > 0 && q.length) {
         const lot = q[0];
         const take = Math.min(need, lot.qty);
-        cost += take * lot.price; covered += take; need -= take; lot.qty -= take;
+        if (first == null) { cost += take * lot.price; covered += take; }
+        need -= take; lot.qty -= take;
         if (lot.qty === 0) q.shift();
+      }
+      if (first != null) need = 0;
+      // units the wallet has no purchase for (bought before EVE's history, or never bought): the tracker's cost, if it has one
+      if (need > 0 && opts.fallback) {
+        const c = opts.fallback(t.type_id, t.location_id, when);
+        if (c != null) { cost += need * c; covered += need; borrowed = need; need = 0; }
       }
       sales.push({
         date: when, type_id: t.type_id, location_id: t.location_id,
         qty: t.quantity, price: t.unit_price, gross: t.quantity * t.unit_price,
-        covered, cost, net: covered > 0 ? covered * t.unit_price * opts.netMult - cost : null,
+        covered, borrowed, cost, net: covered > 0 ? covered * t.unit_price * opts.netMult - cost : null,
       });
     }
     return {
@@ -234,12 +244,12 @@
   }
 
   function summarize(sales, from, to) {
-    const s = { gross: 0, units: 0, net: 0, uncovered: 0, count: 0 };
+    const s = { gross: 0, units: 0, net: 0, uncovered: 0, borrowed: 0, count: 0 };
     for (const x of sales) {
       if (x.date < from || x.date >= to) continue;
       s.gross += x.gross; s.units += x.qty; s.count++;
       if (x.net != null) s.net += x.net;
-      s.uncovered += x.qty - x.covered;
+      s.uncovered += x.qty - x.covered; s.borrowed += x.borrowed || 0;
     }
     return s;
   }
@@ -327,6 +337,53 @@
   }
 
   /**
+   * Rows copied from the tracker workbook's Order Tracking sheet (select the rows in Excel, copy, paste): tab-separated,
+   * columns Date Listed, Item, Venue, Qty Listed, Unit Cost, ... Realized Net. A header row, if it was copied too, says
+   * where each column is; without one the sheet's usual order is assumed. Lines without an item and a unit cost are skipped.
+   * Returns { rows: [{ name, venue, date, qty, cost }], skipped, net } where net is the Realized Net column added up (null if absent).
+   */
+  function parseCosts(text) {
+    const lines = String(text == null ? '' : text).split(/\r?\n/).map(l => l.split('\t').map(c => c.trim()));
+    let col = { date: 0, item: 1, venue: 2, qty: 3, cost: 4, net: 12 };
+    const head = lines.findIndex(c => c.some(x => /^item$/i.test(x)) && c.some(x => /unit cost/i.test(x)));
+    if (head >= 0) {
+      const at = re => lines[head].findIndex(x => re.test(x));
+      col = { date: at(/date listed/i), item: at(/^item$/i), venue: at(/^venue$/i), qty: at(/qty listed/i), cost: at(/unit cost/i), net: at(/realized net/i) };
+    }
+    const cell = (c, i) => (i >= 0 && i < c.length ? c[i] : '');
+    const day = t => { const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t); const ms = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : Date.parse(t); return isFinite(ms) ? ms : null; };
+    const rows = [];
+    let skipped = 0, net = null;
+    lines.forEach((c, i) => {
+      if (i === head || !c.some(Boolean)) return;
+      const name = cell(c, col.item).replace(/\s*\([^)]*\)\s*$/, ''), cost = parseIsk(cell(c, col.cost));     // "Coolant (PI)" is the item Coolant
+      if (!name || cost == null || cost < 0 || /^\d[\d,.]*$/.test(name)) { skipped++; return; }
+      const n = parseIsk(cell(c, col.net));
+      if (n != null) net = (net || 0) + n;
+      rows.push({ name, venue: cell(c, col.venue), date: day(cell(c, col.date)), qty: parseIsk(cell(c, col.qty)), cost });
+    });
+    return { rows, skipped, net };
+  }
+  /**
+   * A cost for units the wallet cannot account for, from the tracker's rows ({ t: type, l: station or null, d: date listed or null, c: unit cost }).
+   * Of the rows for that item, one at the same station is preferred; among those, the latest listed on or before the sale, else the earliest.
+   * Returns a function (type, station, when) -> unit cost or null.
+   */
+  function costLookup(rows) {
+    const by = new Map();
+    for (const r of rows || []) { if (!by.has(r.t)) by.set(r.t, []); by.get(r.t).push(r); }
+    for (const list of by.values()) list.sort((a, b) => (a.d || 0) - (b.d || 0));
+    return (type, station, when) => {
+      const all = by.get(type);
+      if (!all) return null;
+      const here = all.filter(r => r.l != null && r.l === station), pool = here.length ? here : all;
+      let pick = pool[0];
+      for (const r of pool) if ((r.d || 0) <= when) pick = r;
+      return pick.c;
+    };
+  }
+
+  /**
    * What the wallet journal says about the time from `from` up to `to`: where the wallet moved, by kind, and the balance at each end.
    * The kinds add up to `change` exactly. `covered` is false when the journal does not reach back past `from`,
    * in which case the sums cover only part of the span and `open` is unknown.
@@ -377,7 +434,8 @@
    *   pins, copied: entry by entry the newer wins; one removed by hand stays as { gone: true, at } so the removal travels;
    *                 entries older than keep.pins / keep.copied (ms) are dropped.
    *   seen ("Mark as seen"): the newer wins, and one set by hand beats the first-visit default.
-   *   weeks: a finished week's figures from whichever device fixed them first; exact journal figures from either;
+   *   costs (the tracker's cost rows): the newer import wins.
+   *   weeks: a finished week's figures from whichever device fixed them first, unless one worked them out on a newer import of costs; exact journal figures from either;
    *          "as last seen" from the later look; the tracker's figure and the carried-in figure by the newer entry.
    */
   function syncMerge(a, b, now, keep) {
@@ -395,8 +453,9 @@
     const week = (x, y) => {
       x = x || {}; y = y || {};
       const out = {};
-      const f = x.frozenAt && y.frozenAt ? (x.frozenAt < y.frozenAt ? x : y.frozenAt < x.frozenAt ? y : stable(x) >= stable(y) ? x : y) : x.frozenAt ? x : y.frozenAt ? y : null;
-      if (f) for (const k of ['gross', 'units', 'net', 'uncovered', 'frozenAt']) if (f[k] != null) out[k] = f[k];
+      const bx = x.basis || 0, by = y.basis || 0;                 // which import of the tracker's costs the figures were worked out with
+      const f = x.frozenAt && y.frozenAt ? (bx !== by ? (bx > by ? x : y) : x.frozenAt < y.frozenAt ? x : y.frozenAt < x.frozenAt ? y : stable(x) >= stable(y) ? x : y) : x.frozenAt ? x : y.frozenAt ? y : null;
+      if (f) for (const k of ['gross', 'units', 'net', 'uncovered', 'borrowed', 'basis', 'frozenAt']) if (f[k] != null) out[k] = f[k];
       const exact = w => [w.fees, w.change, w.close];
       const j = x.close != null && y.close != null ? (stable(exact(x)) >= stable(exact(y)) ? x : y) : x.close != null ? x : y.close != null ? y : null;
       if (j) { out.fees = j.fees; out.change = j.change; out.close = j.close; }
@@ -413,6 +472,7 @@
       v: 1,
       pins: marks(a.pins, b.pins, keep.pins), copied: marks(a.copied, b.copied, keep.copied),
       seen: seen(a.seen, b.seen),
+      costs: newer(a.costs, b.costs),
       weeks: { carried: newer(wa.carried, wb.carried), w },
     };
   }
@@ -637,7 +697,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, journalSpan, tieOut, stable, syncMerge, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
+    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

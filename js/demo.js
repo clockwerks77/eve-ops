@@ -194,7 +194,7 @@
     if ((m = path.match(/\/universe\/groups\/(\d+)\/$/)) && GROUPS[m[1]]) return answer({ group_id: Number(m[1]), name: GROUPS[m[1]][0], category_id: GROUPS[m[1]][1] }, D);
     if ((m = path.match(/\/universe\/categories\/(\d+)\/$/)) && CATS[m[1]]) return answer({ category_id: Number(m[1]), name: CATS[m[1]] }, D);
     if (/\/location\/$/.test(path)) return answer({ solar_system_id: 30002053, station_id: ST.hek }, 5e3);
-    if (/\/ship\/$/.test(path)) return answer({ ship_item_id: 1, ship_name: 'Dawn Treader IV', ship_type_id: 12733 }, 5e3);
+    if (/\/ship\/$/.test(path)) return answer({ ship_item_id: 3, ship_name: 'Dawn Treader IV', ship_type_id: 12733 }, 5e3);
     if (/\/wallet\/$/.test(path)) return answer(6072843112.37, 2 * M, 40e3);
     if (/\/wallet\/transactions\/$/.test(path)) return answer(q.from_id ? [] : tx, 60 * M, 22 * M);
     if (/\/wallet\/journal\/$/.test(path)) return answer(journal, 60 * M, 22 * M);
@@ -204,6 +204,10 @@
       { item_id: 1, type_id: 527, quantity: 60, location_id: ST.jita, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 2, type_id: 2329, quantity: 1200, location_id: ST.hek, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 3, type_id: 12733, quantity: 1, location_id: ST.hek, location_type: 'station', location_flag: 'Hangar', is_singleton: true },
+      // in the hold of the ship being flown: one item that sells best where the ship is docked, one that sells best elsewhere, and ammunition that is not traded
+      { item_id: 4, type_id: 2048, quantity: 30, location_id: 3, location_type: 'item', location_flag: 'Cargo', is_singleton: false },
+      { item_id: 5, type_id: 2488, quantity: 120, location_id: 3, location_type: 'item', location_flag: 'Cargo', is_singleton: false },
+      { item_id: 6, type_id: 21898, quantity: 2000, location_id: 3, location_type: 'item', location_flag: 'Cargo', is_singleton: false },
     ], 60 * M, 35 * M);
     if (/\/skillqueue\/$/.test(path)) return answer([
       { skill_id: 18580, finished_level: 1, queue_position: 0, start_date: iso(20 * H), finish_date: iso(-(3 * D + 4 * H)) },
