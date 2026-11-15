@@ -103,3 +103,73 @@ jobs:
           } > notes.md
           gh release create "$GITHUB_REF_NAME" "$apk" --title "Eve Ops for Android $v" --notes-file notes.md
           echo "::notice title=published::$apk"
+
+  # Runs the app on an emulator against the page's sample data and keeps screenshots of the app and its widgets.
+  device:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+
+      - name: Let the emulator use hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the app on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          working-directory: android
+          script: |
+            gradle --no-daemon --console=plain connectedDebugAndroidTest > "$RUNNER_TEMP/device.log" 2>&1 || touch "$RUNNER_TEMP/device.failed"
+            adb pull /sdcard/Download/eveops "$RUNNER_TEMP/shots" || true
+            adb logcat -d -t 400 EveOps:V AndroidRuntime:E chromium:W '*:S' > "$RUNNER_TEMP/logcat.txt" || true
+
+      - name: Keep the screenshots
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir -p shots
+          cp device.log logcat.txt shots/ 2>/dev/null || true
+          zip -qr screens.zip shots
+          gh release view ci-screens --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create ci-screens --repo "$GITHUB_REPOSITORY" --prerelease --latest=false \
+            --title "Android test screenshots (sample data)" \
+            --notes "Screenshots from the latest emulator run of the Android app, on the page's sample data. Not a build to install." --target "$GITHUB_SHA"
+          gh release upload ci-screens screens.zip --repo "$GITHUB_REPOSITORY" --clobber
+          echo "::notice title=screens::$(ls shots | tr '\n' ' ')"
+
+      - name: Say what failed
+        if: always()
+        run: |
+          log="$RUNNER_TEMP/device.log"
+          [ -f "$RUNNER_TEMP/device.failed" ] || exit 0
+          {
+            grep -nE "^e: |error:|FAILED|What went wrong|^> |Caused by|AssertionError|expected:<|Could not|Unresolved|Execution failed|Exception" "$log" | head -60
+            echo "--- last lines"
+            tail -25 "$log"
+            echo "--- device log"
+            tail -30 "$RUNNER_TEMP/logcat.txt"
+          } | cut -c1-500 > "$RUNNER_TEMP/errors.txt"
+          msg=$(sed 's/%/%25/g' "$RUNNER_TEMP/errors.txt" | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=emulator run::$msg"
+          exit 1

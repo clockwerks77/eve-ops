@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Test builds only: draws the three widgets on one screen so they can be photographed. -->
+        <activity
+            android:name=".PreviewActivity"
+            android:exported="false" />
+    </application>
+</manifest>
