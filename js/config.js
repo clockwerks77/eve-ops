@@ -71,5 +71,52 @@ window.EVEOPS_CONFIG = {
   // A line with no sale for this many days is listed under "Slow lines".
   staleDays: 14,
 
+  // ---- Expedition ops (the wormhole camp): Phase A, Muster and Kit & Shopping.
+  expedition: {
+    // Adam flies two characters on one account, never both at once: one seat, two modes.
+    modes: [
+      { key: 'khiana', name: 'Khiana Kyn', role: 'Scout and combat lead', hull: 'Odysseus', note: 'Scout, combat and the Odysseus. Expedition Command Ships IV lands Nov 19, 2026.', can: ['gas', 'ratter', 'scan', 'pvp', 'boost'] },   // Gas Cloud Harvesting V, Expedition Frigates III (character baseline, Aug 2026)
+      { key: 'todashi', name: 'Todashi Kitsune', role: 'Boosts and compression', hull: 'Porpoise', note: 'Porpoise boosts and compression. Industrial Command Ships V, Mining Foreman V; Mining Director I to IV trains Nov 20 to 27, 2026.', can: ['barge', 'ratter', 'boost'] },                              // Mining Barge V
+    ],
+    // The can-fly matrix, in the order the muster asks it.
+    canFly: [
+      { key: 'gas', label: 'Gas ship', long: 'Prospect, or Venture with gas harvesting' },
+      { key: 'barge', label: 'Barge', long: 'Procurer or another mining barge' },
+      { key: 'ratter', label: 'Ratter', long: 'Praxis, Drake or Gila' },
+      { key: 'scan', label: 'Scanner', long: 'Cloaky scanning frigate' },
+      { key: 'pvp', label: 'PvP hull', long: 'The PvP doctrine hull' },
+      { key: 'boost', label: 'Boosts', long: 'Any command or boost ship' },
+    ],
+    // What every pilot has to be able to fly for the standard kit; a pilot without one gets a plain-language gap.
+    // sp: skill points from nothing to sit in the hull and fit its tool, added up from EVE's own type data on 2026-11-15
+    // (Venture 750 + Gas Cloud Scoop I 45,505; Procurer 387,760; Praxis 250). It leaves out tank and fitting skills.
+    needs: [
+      { key: 'gas', lack: 'no gas ship', fix: 'assign a Venture and Gas Cloud Harvesting I', sp: 46255 },
+      { key: 'barge', lack: 'no mining barge', fix: 'assign a Procurer (Mining Barge I, Astrogeology III)', sp: 387760 },
+      { key: 'ratter', lack: 'no ratting hull', fix: 'assign a Praxis (Spaceship Command I)', sp: 250 },
+      { key: 'pvp', lack: 'no PvP hull', fix: 'assign the doctrine hull once it is agreed', sp: null },
+    ],
+    spPerHour: { omega: 1800, alpha: 900 },        // no implants, even attributes
+    // The standard four-hull kit, every pilot. `ship` is the item name for the shopping list until a fit is pasted.
+    kit: [
+      { key: 'prospect', label: 'Prospect', ship: 'Prospect', role: 'Gas, and always able to scan its own pilot home' },
+      { key: 'procurer', label: 'Procurer', ship: 'Procurer', role: 'The tanked ore hull' },
+      { key: 'praxis', label: 'Praxis', ship: 'Praxis', role: 'The ratter; a Higgs rig swap makes it the hole roller' },
+      { key: 'pvp', label: 'PvP reship', ship: null, role: 'One hull, one agreed doctrine' },
+    ],
+    places: ['Jita', 'Rens'],
+    // Shared camp stock to start from (every figure can be changed on the page). `doubled` is the camp rule: spares x2 for a multi-night stay.
+    stock: [
+      { item: 'Core Scanner Probe I', label: 'Scanner probes', base: 8, per: 'pilot', doubled: true },
+      { item: 'Nanite Repair Paste', label: 'Nanite paste', base: 50, per: 'pilot', doubled: true },
+      { item: 'Mobile Depot', label: 'Mobile depots', base: 1, per: 'pilot', doubled: true },
+      { item: '', label: 'Ammunition', base: 0, per: 'pilot', doubled: true },
+      { item: '', label: 'Cap boosters', base: 0, per: 'pilot', doubled: true },
+      { item: 'Mobile Tractor Unit', label: 'Tractor units', base: 2, per: 'camp', doubled: false },
+      { item: '', label: 'Salvage destroyer', base: 1, per: 'camp', doubled: false },
+    ],
+    night0: ['Fits simulated', 'Shopping done', 'Wanderer access confirmed', 'Comms confirmed', 'Shared bookmark folder confirmed', 'Rescue frigates staged in Rens'],
+  },
+
   concurrency: 8,
 };

@@ -421,6 +421,73 @@
     return { rows, run };
   }
 
+  // ------------------------------------------------------------ expedition
+  /**
+   * A fit pasted in EFT format (the game's "Copy to clipboard" and every fitting tool write it):
+   *   [Ship, Fit name] then one module per line, "Module, Loaded charge", and "Item x12" for drones and cargo.
+   * Returns { ship, name, items: [{ name, qty }], loaded: [charge names] } without the hull itself, or null when there is no fit header.
+   * Loaded charges are named but not counted: the format does not say how many.
+   */
+  function parseEft(text) {
+    const lines = String(text == null ? '' : text).split(/\r?\n/).map(l => l.trim());
+    const header = /^\[([^,\]]+),\s*(.*)\]$/;
+    const head = lines.findIndex(l => header.test(l));
+    if (head < 0) return null;
+    const m = header.exec(lines[head]), items = new Map(), loaded = new Set();
+    const add = (name, qty) => { if (name) items.set(name, (items.get(name) || 0) + qty); };
+    for (const raw of lines.slice(head + 1)) {
+      if (header.test(raw)) break;                              // a second fit pasted under the first
+      if (!raw || raw[0] === '[') continue;                     // blank lines and [Empty High slot]
+      const line = raw.replace(/\s*\/offline$/i, '');
+      const many = /^(.*?)\s+x(\d+)$/.exec(line);
+      if (many) { add(many[1].trim(), Number(many[2])); continue; }
+      const at = line.indexOf(',');
+      add((at < 0 ? line : line.slice(0, at)).trim(), 1);
+      if (at >= 0 && line.slice(at + 1).trim()) loaded.add(line.slice(at + 1).trim());
+    }
+    return { ship: m[1].trim(), name: m[2].trim(), items: Array.from(items, e => ({ name: e[0], qty: e[1] })), loaded: Array.from(loaded) };
+  }
+
+  /** How much of the standard kit a pilot has: owned or staged at camp both count. kit rows are { pilot_id, hull_key, status }. */
+  function kitReady(pilotId, kit, hullKeys) {
+    const have = hullKeys.filter(k => { const r = kit.find(x => x.pilot_id === pilotId && x.hull_key === k); return !!r && (r.status === 'owned' || r.status === 'staged'); }).length;
+    return { have, total: hullKeys.length, pct: hullKeys.length ? Math.round(have / hullKeys.length * 100) : 0 };
+  }
+
+  /**
+   * Everything still to buy, by where it is bought.
+   *   pilots: [pilot ids]; kit: [{ pilot_id, hull_key, status }] (no row counts as missing);
+   *   hulls: [{ key, label, ship (item name, or null when not chosen yet), buy_at, items: [{ name, qty }] }] (the standard fit, shared by every pilot);
+   *   stock: [{ item (item name or ''), label, base, per: 'pilot' | 'camp', doubled, have, buy_at }].
+   * A missing hull puts the hull and its whole fit on the list once per pilot missing it. Stock is base x pilots (when per pilot),
+   * twice over when doubled, less what is already held. Anything without an item name cannot go into a multibuy and is returned in `unnamed`.
+   */
+  function shoppingList(x) {
+    const places = {}, unnamed = [];
+    const put = (place, name, qty) => { if (qty > 0) { const p = places[place] || (places[place] = new Map()); p.set(name, (p.get(name) || 0) + qty); } };
+    for (const hl of x.hulls) {
+      const missing = x.pilots.filter(id => { const r = x.kit.find(k => k.pilot_id === id && k.hull_key === hl.key); return !r || r.status === 'missing'; }).length;
+      if (!missing) continue;
+      if (!hl.ship) { unnamed.push({ label: hl.label, qty: missing }); continue; }
+      put(hl.buy_at, hl.ship, missing);
+      for (const it of hl.items || []) put(hl.buy_at, it.name, it.qty * missing);
+    }
+    for (const st of x.stock || []) {
+      const short = stockNeed(st, x.pilots.length) - (st.have || 0);
+      if (short <= 0) continue;
+      if (!st.item) unnamed.push({ label: st.label || 'Camp stock', qty: short }); else put(st.buy_at, st.item, short);
+    }
+    const out = {};
+    for (const p of Object.keys(places)) out[p] = Array.from(places[p], e => ({ name: e[0], qty: e[1] })).sort((a, b) => a.name.localeCompare(b.name));
+    return { places: out, unnamed };
+  }
+  /** Camp stock wanted: the base figure, for each pilot when it is per pilot, and twice over when the camp rule (spares x2) applies. */
+  function stockNeed(st, pilots) { return (Number(st.base) || 0) * (st.per === 'pilot' ? pilots : 1) * (st.doubled ? 2 : 1); }
+  /** The text EVE's Multibuy window takes: one "Item name x quantity" per line. */
+  function multibuy(lines) { return lines.map(l => l.name + ' x' + l.qty).join('\n'); }
+  /** Days to train `sp` skill points from nothing at `perHour` (EVE trains round the clock). */
+  function trainDays(sp, perHour) { return sp / perHour / 24; }
+
   // ---------------------------------------------------- sync between devices
   /** JSON with every object's keys in order, so two equal documents give equal text. */
   function stable(v) {
@@ -697,7 +764,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
+    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

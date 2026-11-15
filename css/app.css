@@ -27,7 +27,7 @@ body {
   font: 400 1rem/1.35 "Barlow SC", "Segoe UI", Roboto, system-ui, sans-serif;
   font-variant-numeric: tabular-nums lining-nums;
 }
-h1, h2, h3, p, dl, dd, ul { margin: 0; padding: 0; }
+h1, h2, h3, h4, h5, p, dl, dd, ul { margin: 0; padding: 0; }
 ul { list-style: none; }
 a { color: var(--calm); text-underline-offset: 0.15em; }
 button { font: inherit; color: inherit; }
@@ -432,3 +432,95 @@ button { font: inherit; color: inherit; }
 .wh-picks select { background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; font: inherit; font-size: 0.86rem; padding: 0.1rem 0.2rem; max-width: 100%; }
 .wh-hours { height: 3.2rem; }
 @media (max-width: 46rem) { .wh-split { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------------- expedition ops */
+/* The camp's muster and kit. Cards rather than wide tables, so it reads the same folded and unfolded. */
+.ex { padding: 0.8rem var(--gap) 3rem; max-width: 96rem; }
+.ex-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.2rem; }
+.ex-head h2 { font-size: 1.5rem; font-weight: 600; }
+.ex-tools { margin-left: auto; display: flex; gap: 0.4rem; }
+.ex-lede { margin-top: 0.3rem; }
+.ex-block { margin-top: 1.3rem; }
+.ex-facts { grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.6rem 2rem; margin-top: 0.9rem; max-width: 52rem; }
+.ex-facts .fact { grid-template-columns: 1fr; gap: 0; }
+.ex-facts .fact dd { text-align: left; font-size: 1.5rem; font-weight: 600; }
+.top-bare { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.5rem; }
+/* one of a few choices */
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--seam); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+.seg-b { background: none; border: 0; border-right: 1px solid var(--seam); padding: 0.22rem 0.7rem; color: var(--dim); font-weight: 500; cursor: pointer; }
+.seg-b:last-child { border-right: 0; }
+.seg-b:hover { color: var(--ink); }
+.seg-b.is-on { background: color-mix(in srgb, var(--lead) 20%, transparent); color: var(--ink); }
+.ex-in { background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; padding: 0.18rem 0.45rem; font: inherit; width: 11rem; max-width: 100%; }
+.ex-in::placeholder { color: color-mix(in srgb, var(--dim) 60%, transparent); }
+.ex-wide { width: 20rem; }
+.ex-num { width: 4.6rem; text-align: right; }
+select.ex-in { width: auto; min-width: 11rem; }
+.ex-field { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; margin: 0.25rem 1.2rem 0.25rem 0; color: var(--dim); }
+/* seats: Adam is one seat, shown in the mode he is flying */
+.seats { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.6rem; margin-top: 0.6rem; }
+.seat { display: grid; gap: 0.35rem; align-content: start; background: var(--hull); border-left: 3px solid var(--seam); padding: 0.6rem 0.8rem; }
+.seat-adam { border-left-color: var(--lead); }
+.seat-role { color: var(--dim); font-size: 0.86rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.seat-who { font-size: 1.08rem; }
+/* a pilot, a pilot's kit, a hull's fit */
+.pcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(22rem, 100%), 1fr)); gap: 0.7rem; margin-top: 0.8rem; align-items: start; }
+.pcard { background: var(--hull); padding: 0.75rem 0.9rem 0.85rem; min-width: 0; }
+.pcard.is-open { grid-column: 1 / -1; }
+.pcard-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.8rem; }
+.pcard-head h4 { font-size: 1.3rem; font-weight: 600; margin-right: auto; }
+.pcard-head h4 .sub { display: inline; margin-left: 0.6rem; }
+.pcard-head .chip { margin-right: 0; }
+.pcard-who { color: var(--dim); margin-top: 0.1rem; }
+.pcard-ready { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; margin-top: 0.5rem; }
+.pcard-q { margin-left: auto; color: var(--warn); font-weight: 500; }
+.pcard-q.is-done { color: var(--lead); }
+.pcard-pct { display: inline-flex; align-items: center; gap: 0.5rem; }
+.pcard .btn { margin-top: 0.6rem; }
+.meter { display: inline-block; width: 5.5rem; height: 0.5rem; background: var(--seam); border-radius: 2px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--lead); }
+.meter .w0 { width: 0; } .meter .w25 { width: 25%; } .meter .w50 { width: 50%; } .meter .w75 { width: 75%; } .meter .w100 { width: 100%; }
+.gaps { margin: 0.5rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.25rem; }
+.gaps li { border-left: 3px solid var(--warn); padding-left: 0.6rem; }
+.gaps-none { margin-top: 0.5rem; color: var(--lead); }
+.pedit { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(24rem, 100%), 1fr)); gap: 0.2rem 2rem; margin-top: 0.8rem; border-top: 1px solid var(--seam); padding-top: 0.4rem; }
+.pedit > .tools { grid-column: 1 / -1; align-items: center; }
+.q { padding: 0.5rem 0; }
+.q h5 { font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; }
+.q-n { display: inline-grid; place-items: center; width: 1.45rem; height: 1.45rem; margin-right: 0.5rem; border-radius: 50%; border: 1px solid var(--warn); color: var(--warn); font-size: 0.86rem; }
+.q.is-done .q-n { border-color: var(--lead); color: var(--lead); }
+.q-ask { color: var(--dim); margin-bottom: 0.35rem; }
+.checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0 1.5rem; }
+.kit-rows { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
+.kit-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.3rem 0.8rem; }
+.kit-hull { font-weight: 500; }
+.ex-matrix td, .ex-matrix th { text-align: center; }
+.ex-matrix td.l, .ex-matrix th.l { text-align: left; }
+.ex-matrix input, .ex-stock input[type="checkbox"] { width: 1.15rem; height: 1.15rem; accent-color: var(--lead); }
+.ex-stock td { vertical-align: middle; }
+.ex-stock .ex-in { width: 12rem; }
+.ex-stock .ex-in.ex-num { width: 4.6rem; }
+/* the shopping list: text to paste into the game's Multibuy window */
+.shop { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr)); gap: 0.8rem; margin-top: 0.7rem; align-items: start; }
+.shop-place { background: var(--hull); padding: 0.7rem 0.9rem 0.9rem; }
+.shop-place h4 { font-size: 1.2rem; font-weight: 600; }
+.shop-place h4 .sub { display: inline; margin-left: 0.6rem; }
+.multibuy { margin: 0.5rem 0 0.6rem; padding: 0.5rem 0.6rem; background: var(--void); border: 1px solid var(--seam); border-radius: 3px; font: 0.86rem/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; max-height: 22rem; overflow: auto; }
+.copy-btn { position: relative; }
+.copy-btn.is-copied::after { content: "Copied"; position: absolute; inset: -1px; display: grid; place-items: center; background: var(--lead); color: var(--void); border-radius: 3px; font-weight: 600; }
+.ex-io { background: var(--hull); padding: 0.8rem 0.9rem; border-top: 0; }
+.ex a.btn { text-decoration: none; display: inline-block; }
+/* folded or on a phone: each stock line becomes a small card, so nothing is off to the side */
+@media (max-width: 760px) {
+  .ex-stock, .ex-stock tbody { display: block; }
+  .ex-stock thead { display: none; }
+  .ex-stock tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem 0.8rem; align-items: end; padding: 0.7rem 0; border-top: 1px solid var(--seam); position: relative; }
+  .ex-stock td { display: block; padding: 0; border: 0; text-align: left; min-width: 0; }
+  .ex-stock td[data-l]::before { content: attr(data-l); display: block; color: var(--dim); font-size: 0.8rem; margin-bottom: 0.15rem; }
+  .ex-stock td.l { grid-column: 1 / -1; padding-right: 2rem; }
+  .ex-stock td[data-l="For"], .ex-stock td[data-l="Buy in"] { grid-column: span 2; }
+  .ex-stock .ex-in, .ex-stock .ex-in.ex-num { width: 100%; text-align: left; }
+  .ex-stock .ex-drop { position: absolute; top: 0.5rem; right: 0; }
+  .ex-head h2 { width: 100%; }
+  .ex-tools { margin-left: 0; }
+}

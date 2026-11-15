@@ -57,6 +57,20 @@ A second view for a second character (signed in separately as the "wormhole pilo
 
 Wormhole statics, effects and wormhole types in `js/whdata.js` are derived from data files in [Wanderer](https://github.com/wanderer-industries/wanderer) (MIT License, Copyright (c) 2024 Wanderer Industries).
 
+## Expedition tab
+
+Planning for the four-pilot wormhole camp. Phase A is built: Muster, and Kit & Shopping. The camp board, timers, the session log, the bank and the strike sequence are later phases.
+
+- **No sign-in and no network needed.** Open `#expedition` (or the link on the sign-in screen) and it works. Everything typed here is kept on this device only, under the storage key `eveops.expedition`. It is deliberately left out of the optional GitHub sync, because it holds other people's names.
+- **Adam is one seat.** Khiana Kyn and Todashi Kitsune are on one account, so they are one pilot with a mode switch (Khiana-mode: scout and combat lead in the Odysseus; Todashi-mode: boosts and compression in the Porpoise). The other character always reads as logged off, and Adam cannot be put in a second seat.
+- **Muster.** A card per pilot with the six muster questions (who they are, what they can fly, whether they will train an assigned seat, corp home or nomad, which nights, loss tolerance), kit readiness, and the gaps in plain words with a training estimate from nothing (1,800 skill points an hour as an Omega, 900 as an Alpha). The Can fly table can be ticked directly.
+- **Kit & Shopping.** Every pilot is tracked against the standard four hulls: Prospect, Procurer, Praxis and the PvP reship (Missing, Owned, At camp; the last two count as ready). Each hull takes one fit pasted in EFT format, bought in Jita or Rens. Camp stock lines are Each, for each pilot or for the camp, doubled for spares, less what is already held. The shopping list is every missing hull with its fit plus the stock still short, as text for the game's Multibuy window (Market, Multibuy, Import from clipboard). It carries no prices. A line with no item name, such as the PvP hull before a doctrine is agreed, is listed underneath as not yet on the list.
+- **Night 0 checklist**, with the time each box was ticked.
+- **Export and Import.** Export copies the whole module as JSON (or saves a file in a browser) and the muster as Markdown; Import replaces what is on the device with a pasted export. Do this before changing phones.
+- The starting stock figures, the training estimates and the standard kit are in `js/config.js` under `expedition`.
+
+The page also keeps a copy of itself on the device (`sw.js`), so it opens with no network. Trading and Wormholes still need EVE's servers for their numbers; the Expedition tab does not.
+
 ## Android app and widgets
 
 `android/` holds a small Android app (Android 12 or newer). It shows this same page full screen and adds three home-screen widgets:
@@ -113,6 +127,8 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
 - `js/app.js` — loading, model, drawing
 - `js/demo.js` — sample data behind `#demo`
 - `js/wh.js`, `js/whdata.js` — the Wormholes tab and its table of statics, effects and wormhole types
+- `js/expedition.js` — the Expedition tab (its rules are in `js/logic.js`, its starting figures in `js/config.js`)
+- `sw.js` — keeps a copy of the page's own files on the device so it opens with no network
 - `tests/logic.test.js` — run with `node --test tests/logic.test.js`
 - `android/` — the Android app: `Auth.kt` (sign-in), `Bridge.kt` (link to the page), `Refresh.kt` (background refresh), `Faces.kt` (what each widget says and how its text fits; unit-tested), `Widgets.kt`
 - `tools/` — checks to run before a push:
@@ -120,6 +136,7 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
   - `node tools/copy-test.js` presses price buttons on the sample data and checks the copied marks (clipboard, progress, Undo, clear)
   - `node tools/board-test.js` works the trip plan and the weekly close on the sample data
   - `node tools/sync-test.js` runs two stand-in devices against a stand-in for GitHub's gist API and checks that marks, pins and tracker figures travel
+  - `node tools/expedition-test.js` works the Expedition view with nobody signed in: Adam's one seat, a pilot's muster questions, kit readiness, the shopping list, export and import, and a reload with the network off
   - `node tools/app-link-test.js` checks the page's side of the Android app link with a stand-in for the app (give it a file name to rewrite the Android test fixture `android/app/src/test/resources/snapshot-demo.json`)
   - `tools/ci.sh [commit]` waits for GitHub's Android build and emulator run and prints what they reported
   - `tools/screens.sh <folder>` fetches the emulator screenshots

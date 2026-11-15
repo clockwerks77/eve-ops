@@ -13,6 +13,8 @@
   const plural = (n, one, many) => num(n) + ' ' + (n === 1 ? one : many || one + 's');
 
   // ------------------------------------------------------------------ dom
+  /** Which view an address asks for: Trading unless it names another. */
+  function viewOf(hash) { return hash === '#wormholes' ? 'wh' : hash === '#expedition' ? 'ex' : 'trade'; }
   function h(tag, props) {
     const el = document.createElement(tag);
     if (props) {
@@ -116,7 +118,7 @@
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, openCalls: new Set(), journal: null, costs: (!demo && E.store.get('eveops.costs')) || null, costDraft: null, costNote: null, notify: Object.assign({ change: false, extractors: false, launchpad: false }, E.store.get('eveops.notify')), notifyAllowed: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
-    prices: new Map(), tab: null, follow: true, view: location.hash === '#wormholes' ? 'wh' : 'trade', hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
+    prices: new Map(), tab: null, follow: true, view: viewOf(location.hash), hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
   const me = () => '/characters/' + S.who.id;
@@ -1656,7 +1658,7 @@
     const f = S.feeds['Market books'];
     return h('header', { class: 'top' },
       h('div', { class: 'who' }, h('h1', null, S.who.name), h('p', null, where + ship)),
-      h('nav', { class: 'views', 'aria-label': 'Views' }, [['trade', 'Trading'], ['wh', 'Wormholes']].map(v =>
+      h('nav', { class: 'views', 'aria-label': 'Views' }, [['trade', 'Trading'], ['wh', 'Wormholes'], ['ex', 'Expedition']].map(v =>
         h('button', { type: 'button', class: 'view' + (S.view === v[0] ? ' is-on' : ''), 'aria-pressed': S.view === v[0] ? 'true' : 'false', onclick: () => setView(v[0]) }, v[1]))),
       m && h('dl', { class: 'purse' },
         h('div', null, h('dt', null, m.both != null ? 'Overall wealth, both' : 'Overall wealth'), h('dd', { title: m.wealth == null ? '' : L.isk(Math.round(m.both != null ? m.both : m.wealth)) }, m.wealth == null ? '' : L.short(m.both != null ? m.both : m.wealth))),
@@ -1671,11 +1673,24 @@
 
   function setView(v) {
     S.view = v;
-    if (!demo) history.replaceState(null, '', v === 'wh' ? '#wormholes' : location.pathname);
+    if (!demo) history.replaceState(null, '', v === 'wh' ? '#wormholes' : v === 'ex' ? '#expedition' : location.pathname);
     paint();
   }
+  /**
+   * Expedition ops needs no EVE sign-in and no network, so it can stand alone: this is the page when nobody is signed in
+   * and the address asks for it. Signed in, it is a third view under the usual top bar.
+   */
+  function expeditionAlone() {
+    const y = window.scrollY;
+    root.replaceChildren(
+      demo ? h('p', { class: 'banner' }, 'Sample data: an invented crew. ', h('a', { href: './' }, 'Leave sample data')) : '',
+      h('header', { class: 'top top-bare' }, h('div', { class: 'who' }, h('h1', null, 'Eve Ops'), h('p', null, 'Not signed in to EVE. Expedition ops works without it.')),
+        h('nav', { class: 'views', 'aria-label': 'Views' }, h('button', { type: 'button', class: 'view', onclick: () => { history.replaceState(null, '', location.pathname); S.view = 'trade'; loginView(S.notice); } }, 'Sign in for Trading and Wormholes'))),
+      window.Ex.view(paint));
+    window.scrollTo(0, y);
+  }
   function paint() {
-    if (!demo && !E.who()) return loginView(S.notice || 'Your sign-in ended. Log in again to carry on.');
+    if (!demo && !E.who()) return S.view === 'ex' && window.Ex ? expeditionAlone() : loginView(S.notice || 'Your sign-in ended. Log in again to carry on.');
     const m = S.ready ? build() : null;
     share(m);
     const y = window.scrollY;
@@ -1684,6 +1699,10 @@
       const el = root.querySelector('[data-keep="' + typing.key + '"]');
       if (el && document.activeElement !== el) { el.value = typing.value; el.focus({ preventScroll: true }); try { el.setSelectionRange(typing.a, typing.b); } catch (e) { /* not a text box */ } }
     }, 0);
+    if (S.view === 'ex' && window.Ex) {
+      root.replaceChildren(demo ? h('p', { class: 'banner' }, 'Sample data: an invented crew. ', h('a', { href: './' }, 'Leave sample data')) : '', topView(m), window.Ex.view(paint));
+      return window.scrollTo(0, y);
+    }
     if (S.view === 'wh' && window.Wh) {
       root.replaceChildren(demo ? h('p', { class: 'banner' }, 'Sample data. ', h('a', { href: './' }, 'Leave sample data')) : '', topView(m), window.Wh.view(paint, m ? lootView(m) : null));
       return window.scrollTo(0, y);
@@ -1755,7 +1774,8 @@
         ? h('button', { type: 'button', class: 'btn btn-big', onclick: e => { if (!E.native) e.currentTarget.disabled = true; Promise.resolve(E.login()).catch(err => loginView(err.message)); } }, 'Log in with EVE')
         : h('p', { class: 'door-note' }, 'Sign-in is not switched on yet: the EVE application’s Client ID still has to be added to this page.'),
       h('p', { class: 'small' }, 'Log in with the character that holds your market orders. Access is read-only, and the sign-in is kept ' + (E.native ? 'in this app only.' : 'in this browser only.')),
-      h('p', { class: 'small' }, h('a', { href: '#demo' }, 'Look around with sample data'))));
+      h('p', { class: 'small' }, h('a', { href: '#demo' }, 'Look around with sample data')),
+      window.Ex ? h('p', { class: 'small' }, h('a', { href: '#expedition' }, 'Expedition ops'), ': the camp\u2019s muster and kit. No sign-in or network needed.') : null));
   }
 
   /** A board left open for days should notice when a newer version has been published. */
@@ -1783,10 +1803,17 @@
   }
 
   // ----------------------------------------------------------------- boot
+  /** Keeps a copy of the page on the device, so it opens with no network (Expedition ops is fully usable that way). */
+  function keepOffline() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('sw.js?v=' + (VERSION || '0')).catch(() => { /* the page works as before without it */ });
+  }
   async function boot() {
+    keepOffline();
+    if (S.view === 'ex' && window.Ex && S.who) paint();          // nothing to wait for
     window.addEventListener('hashchange', () => {
       if ((location.hash === '#demo') !== demo) return location.reload();
-      S.view = location.hash === '#wormholes' ? 'wh' : 'trade';
+      S.view = viewOf(location.hash);
       paint();
     });
     if (demo) S.who = window.Demo.who;
@@ -1797,7 +1824,7 @@
       if (done === 'scout') { S.view = 'wh'; history.replaceState(null, '', '#wormholes'); }
       try { await E.init(); } catch (err) { S.notice = err.message; }
       S.who = E.who();
-      if (!S.who) return loginView(S.notice);
+      if (!S.who) return paint();                 // the sign-in screen, or Expedition ops when the address asks for it
     }
     const scout = () => (window.Wh && window.Wh.signedIn() ? window.Wh.tick().then(moved => { if (moved && S.view === 'wh') paint(); }, () => {}) : null);
     if (S.view === 'wh') paint();

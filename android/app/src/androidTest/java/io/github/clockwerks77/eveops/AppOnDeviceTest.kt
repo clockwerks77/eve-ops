@@ -174,10 +174,17 @@ class AppOnDeviceTest {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.cancelAll()
         ctx.getSharedPreferences("alerts", Context.MODE_PRIVATE).edit().clear().commit()
+        // Android clears notifications a moment after it is asked to; one posted straight away can be swept up with them
+        Thread.sleep(2000)
 
         instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2"), false) }
-        assertTrue("orders and extractors each get a notification", waitFor(10) { nm.activeNotifications.size == 2 })
-        assertEquals(setOf("2 orders to change", "Extractors stopped on 1 colony"), titles(nm))
+        val both = setOf("2 orders to change", "Extractors stopped on 1 colony")
+        val told = waitFor(15) { titles(nm) == both }
+        assertTrue(
+            "orders and extractors each get a notification; showing ${titles(nm)}, allowed ${Alerts.allowed(ctx)}, " +
+                "known ${ctx.getSharedPreferences("alerts", Context.MODE_PRIVATE).getStringSet("known", null)}",
+            told,
+        )
         device.openNotification()
         assertTrue("and it shows in the notification shade", seen("2 orders to change", 15))
         shot("notifications")
@@ -185,6 +192,7 @@ class AppOnDeviceTest {
 
         // the next check finds the same things: nothing more to say
         nm.cancelAll()
+        Thread.sleep(2000)
         instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2"), false) }
         Thread.sleep(1500)
         assertEquals("the same things are not told twice", 0, nm.activeNotifications.size)
@@ -195,8 +203,7 @@ class AppOnDeviceTest {
         assertEquals("what was on screen is not told again", 0, nm.activeNotifications.size)
         // one more order loses the lead while the app is closed: only that is news
         instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2", "c3", "c4"), false) }
-        assertTrue("a new order is told", waitFor(10) { nm.activeNotifications.size == 1 })
-        assertEquals(setOf("1 order to change"), titles(nm))
+        assertTrue("a new order is told; showing ${titles(nm)}", waitFor(15) { titles(nm) == setOf("1 order to change") })
         nm.cancelAll()
     }
 }

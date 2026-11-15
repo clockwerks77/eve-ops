@@ -3,26 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- The page may only talk to EVE's API, EVE's login, zKillboard (kill history), GitHub's API (the optional sync file) and its own address (to notice a new version), and only run its own scripts. -->
+<!-- The page may only talk to EVE's API, EVE's login, zKillboard (kill history), GitHub's API (the optional sync file) and its own address (to notice a new version), and only run its own scripts (sw.js, its own too, keeps the copy that opens with no network). -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://images.evetech.net; connect-src 'self' https://esi.evetech.net https://login.eveonline.com https://zkillboard.com https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#0b171d">
 <meta name="color-scheme" content="dark">
 <!-- Bump this number and the ?v= values below together on every deploy, so browsers fetch the new files. -->
-<meta name="eveops-version" content="19">
+<meta name="eveops-version" content="20">
 <title>Eve Ops</title>
-<link rel="stylesheet" href="css/app.css?v=19">
+<link rel="stylesheet" href="css/app.css?v=20">
 </head>
 <body>
 <div id="app"><noscript>Eve Ops needs JavaScript to read your orders from EVE.</noscript></div>
-<script src="js/config.js?v=19"></script>
-<script src="js/logic.js?v=19"></script>
-<script src="js/esi.js?v=19"></script>
-<script src="js/demo.js?v=19"></script>
-<script src="js/whdata.js?v=19"></script>
-<script src="js/wh.js?v=19"></script>
-<script src="js/sync.js?v=19"></script>
-<script src="js/app.js?v=19"></script>
+<script src="js/config.js?v=20"></script>
+<script src="js/logic.js?v=20"></script>
+<script src="js/esi.js?v=20"></script>
+<script src="js/demo.js?v=20"></script>
+<script src="js/whdata.js?v=20"></script>
+<script src="js/wh.js?v=20"></script>
+<script src="js/sync.js?v=20"></script>
+<script src="js/expedition.js?v=20"></script>
+<script src="js/app.js?v=20"></script>
 </body>
 </html>

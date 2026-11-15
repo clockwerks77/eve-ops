@@ -528,3 +528,58 @@ test('tracker costs fill in only where the wallet has no purchase', () => {
   assert.equal(t2.lots.get(519).length, 0);                      // the wallet's lot is still used up
   assert.equal(L.summarize(t2.sales, 0, Infinity).uncovered, 3);
 });
+
+test('expedition: a fit pasted in EFT format', () => {
+  const fit = L.parseEft([
+    '[Procurer, Camp standard]', '',
+    'Mining Laser Upgrade II', 'Mining Laser Upgrade II', '',
+    'Multispectrum Shield Hardener II', 'Medium Shield Extender II', 'Medium Shield Extender II', '[Empty Med slot]', '',
+    'Strip Miner I', 'Strip Miner I', 'Small Core Defense Field Extender I /offline', '',
+    'Heavy Missile Launcher II, Scourge Fury Heavy Missile', '',
+    'Hobgoblin II x5', 'Mining Drone I x5', '', 'Nanite Repair Paste x50', 'Hobgoblin II x5',
+    '', '[Venture, something else]', 'Miner I',
+  ].join('\n'));
+  assert.equal(fit.ship, 'Procurer'); assert.equal(fit.name, 'Camp standard');
+  const qty = n => (fit.items.find(i => i.name === n) || {}).qty;
+  assert.equal(qty('Mining Laser Upgrade II'), 2); assert.equal(qty('Medium Shield Extender II'), 2); assert.equal(qty('Strip Miner I'), 2);
+  assert.equal(qty('Small Core Defense Field Extender I'), 1);            // "/offline" is not part of the name
+  assert.equal(qty('Heavy Missile Launcher II'), 1); assert.deepEqual(fit.loaded, ['Scourge Fury Heavy Missile']);
+  assert.equal(qty('Hobgoblin II'), 10); assert.equal(qty('Nanite Repair Paste'), 50);
+  assert.equal(qty('Miner I'), undefined); assert.equal(qty('Procurer'), undefined);   // the second fit and the hull itself are not items
+  assert.equal(L.parseEft('just some words'), null); assert.equal(L.parseEft(''), null);
+  assert.deepEqual(L.parseEft('[Praxis, bare hull]').items, []);
+});
+
+test('expedition: kit readiness and the shopping list (acceptance test 2)', () => {
+  const hulls = [
+    { key: 'prospect', label: 'Prospect', ship: 'Prospect', buy_at: 'Jita', items: [{ name: 'Gas Cloud Scoop II', qty: 2 }, { name: 'Covert Ops Cloaking Device II', qty: 1 }] },
+    { key: 'procurer', label: 'Procurer', ship: 'Procurer', buy_at: 'Jita', items: [] },
+    { key: 'praxis', label: 'Praxis', ship: 'Praxis', buy_at: 'Rens', items: [{ name: 'Large Remote Armor Repairer II', qty: 1 }] },
+    { key: 'pvp', label: 'PvP reship', ship: null, buy_at: 'Jita', items: [] },
+  ];
+  const keys = hulls.map(x => x.key);
+  // one pilot, two of the four hulls owned: half ready
+  const kit = [{ pilot_id: 'a', hull_key: 'procurer', status: 'owned' }, { pilot_id: 'a', hull_key: 'praxis', status: 'owned' }, { pilot_id: 'a', hull_key: 'prospect', status: 'missing' }];
+  assert.deepEqual(L.kitReady('a', kit, keys), { have: 2, total: 4, pct: 50 });
+  const one = L.shoppingList({ pilots: ['a'], kit, hulls, stock: [] });
+  assert.deepEqual(one.places, { Jita: [{ name: 'Covert Ops Cloaking Device II', qty: 1 }, { name: 'Gas Cloud Scoop II', qty: 2 }, { name: 'Prospect', qty: 1 }] });
+  assert.deepEqual(one.unnamed, [{ label: 'PvP reship', qty: 1 }]);
+  assert.equal(L.multibuy(one.places.Jita), 'Covert Ops Cloaking Device II x1\nGas Cloud Scoop II x2\nProspect x1');
+  // "staged at camp" counts as having it; a second pilot with nothing needs everything
+  const two = kit.concat([{ pilot_id: 'b', hull_key: 'prospect', status: 'staged' }]);
+  assert.equal(L.kitReady('b', two, keys).pct, 25);
+  const both = L.shoppingList({ pilots: ['a', 'b'], kit: two, hulls,
+    stock: [{ item: 'Core Scanner Probe I', base: 8, per: 'pilot', doubled: true, have: 10, buy_at: 'Jita' }, { item: 'Mobile Tractor Unit', base: 2, per: 'camp', doubled: false, have: 2, buy_at: 'Jita' },
+      { item: '', label: 'Ammunition', base: 1000, per: 'pilot', doubled: true, have: 0, buy_at: 'Jita' }, { item: 'Mobile Depot', base: 1, per: 'pilot', doubled: true, have: 0, buy_at: 'Rens' }] });
+  const at = (place, n) => (both.places[place].find(i => i.name === n) || {}).qty;
+  assert.equal(at('Jita', 'Prospect'), 1); assert.equal(at('Jita', 'Procurer'), 1); assert.equal(at('Rens', 'Praxis'), 1); assert.equal(at('Rens', 'Large Remote Armor Repairer II'), 1);
+  assert.equal(at('Jita', 'Core Scanner Probe I'), 8 * 2 * 2 - 10);                 // per pilot, doubled, less what is held
+  assert.equal(at('Jita', 'Mobile Tractor Unit'), undefined);                       // already have both
+  assert.equal(at('Rens', 'Mobile Depot'), 4);
+  assert.deepEqual(both.unnamed, [{ label: 'PvP reship', qty: 2 }, { label: 'Ammunition', qty: 4000 }]);
+  // everything owned: nothing to buy
+  const full = keys.map(k => ({ pilot_id: 'a', hull_key: k, status: 'owned' }));
+  assert.deepEqual(L.shoppingList({ pilots: ['a'], kit: full, hulls, stock: [] }), { places: {}, unnamed: [] });
+  assert.equal(L.kitReady('a', full, keys).pct, 100);
+  assert.equal(Math.round(L.trainDays(387760, 1800)), 9); assert.equal(L.stockNeed({ base: 3, per: 'camp', doubled: true }, 4), 6);
+});
