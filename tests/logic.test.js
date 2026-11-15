@@ -255,3 +255,10 @@ test('probe scanner paste', () => {
   assert.equal(s[2].scan, 'Cosmic Anomaly');
   assert.deepEqual(L.parseSigs(''), []);
 });
+
+test('ship names with symbols come through as typed', () => {
+  assert.equal(L.shipName("u'\\u263cQuiet Knife'"), '☼Quiet Knife');
+  assert.equal(L.shipName('Dawn Treader IV'), 'Dawn Treader IV');
+  assert.equal(L.shipName("u'It\\'s fine'"), "It's fine");
+  assert.equal(L.shipName(undefined), '');
+});

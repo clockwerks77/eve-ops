@@ -234,7 +234,7 @@
         h('p', { class: 'small' }, 'This is a second sign-in beside the trading character. Read-only, kept in this browser.'));
     }
     const here = S.loc && S.loc.solar_system_id, cur = W.systems[here], id = S.sel && W.systems[S.sel] ? S.sel : here, s = W.systems[id];
-    const whereTxt = !cur ? 'Finding ' + me.name + '.' : (S.loc.structure_id || S.loc.station_id ? 'Docked in ' : 'In space in ') + cur.name + (cur.cls ? ' (' + cur.cls + ')' : '') + (S.ship ? ', flying ' + (W.names[S.ship.ship_type_id] || 'a ship') + (S.ship.ship_name ? ' "' + S.ship.ship_name + '"' : '') : '');
+    const whereTxt = !cur ? 'Finding ' + me.name + '.' : (S.loc.structure_id || S.loc.station_id ? 'Docked in ' : 'In space in ') + cur.name + (cur.cls ? ' (' + cur.cls + ')' : '') + (S.ship ? ', flying ' + (W.names[S.ship.ship_type_id] || 'a ship') + (S.ship.ship_name ? ' "' + L.shipName(S.ship.ship_name) + '"' : '') : '');
     const head = h('header', { class: 'wh-head' }, h('h2', null, me.name), h('p', null, whereTxt),
       h('span', { class: 'tools' },
         s && isJ(id) && id !== W.home ? h('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: () => { W.home = id; save(); repaint(); } }, 'Make ' + s.name + ' home') : null,

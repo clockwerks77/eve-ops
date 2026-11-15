@@ -1003,7 +1003,7 @@
     const st = S.loc && (S.loc.station_id || S.loc.structure_id);
     const sys = S.loc && K.systems[S.loc.solar_system_id];
     const where = !S.loc ? '' : st ? 'Docked at ' + ((K.stations[st] || {}).name || nameOf(st)) : 'In space' + (sys ? ' in ' + sys.name : '');
-    const ship = S.ship ? ', flying ' + nameOf(S.ship.ship_type_id) + (S.ship.ship_name ? ' "' + S.ship.ship_name + '"' : '') : '';
+    const ship = S.ship ? ', flying ' + nameOf(S.ship.ship_type_id) + (S.ship.ship_name ? ' "' + L.shipName(S.ship.ship_name) + '"' : '') : '';
     const f = S.feeds['Market books'];
     return h('header', { class: 'top' },
       h('div', { class: 'who' }, h('h1', null, S.who.name), h('p', null, where + ship)),

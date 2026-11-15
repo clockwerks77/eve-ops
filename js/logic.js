@@ -427,6 +427,13 @@
     if (h < 48) return h + ' h' + (m % 60 && h < 10 ? ' ' + (m % 60) + ' min' : '');
     return Math.round(h / 24) + ' days';
   }
+  /** ESI hands back ship names that contain symbols as u'\\u263cName'; turn that into the name as typed in game. */
+  function shipName(raw) {
+    const m = /^u'(.*)'$/.exec(String(raw || ''));
+    if (!m) return String(raw || '');
+    return m[1].replace(/\\u([0-9a-fA-F]{4})/g, (x, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\x([0-9a-fA-F]{2})/g, (x, hex) => String.fromCharCode(parseInt(hex, 16))).replace(/\\(['\\])/g, '$1');
+  }
   /** Security status as the game shows it: one decimal, and anything above 0 never shows as 0.0. */
   function sec(s) {
     let r = Math.round(s * 10) / 10;
@@ -439,6 +446,6 @@
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
     orderChecks, weekOf, moveRead, programOutput, piRun, parseSigs,
-    isk, short, span, sec,
+    isk, short, span, sec, shipName,
   };
 });
