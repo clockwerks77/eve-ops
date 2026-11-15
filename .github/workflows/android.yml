@@ -1,0 +1,27 @@
+name: Android app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: What this runner has
+        run: |
+          {
+            echo "java: $(java -version 2>&1 | head -1)"
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            ls "$ANDROID_HOME/platforms" | tr '\n' ' '; echo
+            ls "$ANDROID_HOME/build-tools" | tr '\n' ' '; echo
+            gradle --version 2>/dev/null | grep -E '^Gradle' || echo "no gradle on PATH"
+            ls /dev/kvm 2>&1
+          } > probe.txt 2>&1
+          msg=$(sed 's/%/%25/g' probe.txt | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::notice title=probe::$msg"
