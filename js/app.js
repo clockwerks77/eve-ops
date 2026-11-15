@@ -532,10 +532,11 @@
       const o0 = g[0].order;
       const c = costOf(o0.type_id);
       const cost = c ? c.cost : null;
-      const plan = g.every(x => x.pos)
-        ? L.planSells(g, { cost, jitaSell: jitaSell(o0.type_id), isJita: o0.location_id === C.jita.station, netMult: NET, modify: C.fees.modify, sniperUnits: C.sniperUnits, bigMove: C.bigMove })
-        : new Map();
       const v = vel.get(o0.type_id + ':' + o0.location_id) || { d1: 0, d7: 0, last: 0 };
+      const plan = g.every(x => x.pos)
+        ? L.planSells(g, { cost, jitaSell: jitaSell(o0.type_id), isJita: o0.location_id === C.jita.station, netMult: NET, modify: C.fees.modify, sniperUnits: C.sniperUnits, bigMove: C.bigMove,
+          slowDays: windowDays >= C.slowFee.days && v.d7 === 0 && now - (led.lastBuy.get(o0.type_id) || 0) > C.slowFee.days * D ? C.slowFee.days : 0 })
+        : new Map();
       const book = S.books.get(o0.region_id + ':' + o0.type_id);
       let left = 0;
       for (const x of g) {
@@ -834,34 +835,43 @@
   function saveMarks() { if (!demo) E.store.set('eveops.copied', S.copied); paint(); }
   function unmark(keys) { keys.forEach(k => { delete S.copied[k]; }); saveMarks(); }
   const hhmm = ms => new Date(ms).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false });
-  /** The price button and, once pressed, its mark: quiet with the time while that is still the price to type; a line of warning when it is not. */
+  /**
+   * The price button and, once pressed, its mark. The mark adds no line: the time sits on the button's top border
+   * (press it to remove the mark), the button goes quiet with a tick while that is still the price to type,
+   * and anything that needs words (not in the book, book moved) is said in the Call column by markWhy.
+   */
   function priceMark(key, price, mark, soft) {
     const held = mark && mark.state === 'waiting' && !mark.moved;
     const btn = h('button', { class: 'price' + (soft ? ' is-soft' : '') + (held ? ' is-done' : ''), type: 'button', 'data-copy': key, title: (held ? 'Copy again: ' : 'Copy ') + price, onclick: e => copy(e.currentTarget, price, key) }, L.isk(price));
     if (!mark || mark.state === 'landed') return btn;
-    const undo = h('button', { class: 'unmark', type: 'button', title: 'Remove this mark', onclick: () => unmark([key]) }, 'Undo');
-    const note = held ? h('span', { class: 'mark' + (mark.last ? ' is-last' : '') }, (mark.last ? 'Last copied ' : 'Copied ') + hhmm(mark.at) + ' ', undo)
-      : mark.state === 'missed' ? h('span', { class: 'mark is-missed' }, 'Copied ' + hhmm(mark.at) + ' but not in the book. ', undo)
-      : h('span', { class: 'mark is-moved' }, 'Copied ' + L.isk(mark.price) + ' at ' + hhmm(mark.at) + '; the book has moved. ', undo);
-    return [btn, note];
+    const said = markSaid(mark);
+    const tag = h('button', { class: 'tag' + (held ? (mark.last ? ' is-last' : '') : ' is-warn'), type: 'button', title: (said || 'Copied ' + hhmm(mark.at) + '.') + ' Press to remove the mark.', 'aria-label': 'Remove the copied mark', onclick: () => unmark([key]) },
+      (held && mark.last ? 'Last ' : '') + hhmm(mark.at), h('span', { class: 'x', 'aria-hidden': 'true' }, '\u00d7'));
+    return h('span', { class: 'pm' }, btn, tag);
   }
+  function markSaid(mark) {
+    if (!mark || mark.state === 'landed') return null;
+    if (mark.state === 'missed') return 'Copied ' + hhmm(mark.at) + ' but not in the book.';
+    return mark.moved ? 'Copied ' + L.isk(mark.price) + ' at ' + hhmm(mark.at) + '; the book has moved.' : null;
+  }
+  const markWhy = r => { const t = markSaid(r.copied); return t && h('span', { class: 'why' + (r.copied.state === 'missed' ? ' why-warn' : '') }, t); };
   function C_(cls, label) { const el = h('div', { class: 'c ' + cls, 'data-label': label }); for (let i = 2; i < arguments.length; i++) add(el, arguments[i]); return el; }
 
   function callCell(r, kind) {
     if (r.pin && !r.pin.done) {
       const moved = r.plan.action === 'tick' && r.plan.target != null && (kind === 'sell' ? r.plan.target < r.pin.price : r.plan.target > r.pin.price);
       return C_('call', 'Call', h('span', { class: 'chip chip-pin' }, 'Pinned'),
-        h('span', { class: 'why' }, moved ? 'The book has moved since: now ' + L.isk(r.plan.target) + '.' : 'Waiting to see it in the book, up to 5 min.'));
+        h('span', { class: 'why' }, moved ? 'The book has moved since: now ' + L.isk(r.plan.target) + '.' : 'Waiting to see it in the book, up to 5 min.'), markWhy(r));
     }
     const done = (r.pin && r.pin.done) || (r.copied && r.copied.state === 'landed');
     const lead = r.pos && r.pos.status === 'leading';
-    const big = r.plan.kind === 'big';
-    const label = { tick: 'Change', optional: big ? 'Big move' : 'Sniper', wait: 'Loading', none: 'Gone', hold: lead ? (kind === 'sell' ? 'Leading' : 'Top bid') : 'Hold' }[r.plan.action];
+    const big = r.plan.kind === 'big', slow = r.plan.kind === 'slow';
+    const label = { tick: 'Change', optional: big ? 'Big move' : slow ? 'Slow line' : 'Sniper', wait: 'Loading', none: 'Gone', hold: lead ? (kind === 'sell' ? 'Leading' : 'Top bid') : 'Hold' }[r.plan.action];
     const cls = { tick: 'chip-go', optional: big ? 'chip-big' : 'chip-opt', wait: 'chip-wait', none: 'chip-gone', hold: lead ? 'chip-lead' : 'chip-hold' }[r.plan.action];
     const depthShown = r.pos && r.plan.action === 'tick' && r.plan.kind !== 'mismatch' && (r.pos.status === 'undercut' || r.pos.status === 'behind' || r.pos.status === 'outbid');
     const why = r.plan.action === 'hold' && lead ? null
       : r.plan.action === 'tick' ? (depthShown ? '' : r.plan.reason + ' ') + (r.plan.fee ? 'Changing costs ' + L.short(r.plan.fee) + '.' : '')
-      : String(r.plan.reason || '').replace(/^Sniper: (.)/, (x, c) => c.toUpperCase());
+      : String(r.plan.reason || '').replace(/^Sniper: (.)/, (x, c) => c.toUpperCase()) + (slow && r.plan.fee ? ' Changing costs ' + L.short(r.plan.fee) + '.' : '');
     const soon = r.expires - Date.now() < 3 * D;
     let read = null;
     if (big && r.week && r.pos && r.pos.front != null) {
@@ -873,13 +883,13 @@
       h('span', { class: 'chip ' + cls }, label), done && h('span', { class: 'chip chip-done' }, 'Changed'),
       soon && r.plan.action !== 'none' && h('span', { class: 'chip chip-opt' }, 'Expires ', live('until', r.expires)),
       r.checks.length ? h('span', { class: 'why why-check' }, r.checks.join(' ')) : null,
-      why && h('span', { class: 'why' }, read ? why.replace(' Dump or repricing: your call.', '') + ' ' + read : why));
+      why && h('span', { class: 'why' }, read ? why.replace(' Dump or repricing: your call.', '') + ' ' + read : why), markWhy(r));
   }
   function typeCell(r) {
     if (r.typed == null) return C_('type', 'Type this', h('span', { class: 'none' }, (r.pin && r.pin.done) || (r.copied && r.copied.state === 'landed') ? 'Done' : ''));
     return C_('type', 'Type this', priceMark(r.id, r.typed, r.copied, r.plan.action === 'optional' && !r.pin));
   }
-  const rowClass = r => 'row is-' + r.plan.action + (r.pin && !r.pin.done ? ' is-pinned' : '') + (r.typed != null && r.copied && r.copied.state === 'waiting' && !r.copied.moved ? ' is-copied' : '');
+  const rowClass = r => 'row is-' + r.plan.action + (r.pin && !r.pin.done ? ' is-pinned' : '') + (r.typed != null && r.copied && r.copied.state === 'waiting' && !r.copied.moved ? ' is-copied' + (r.copied.last ? ' is-last' : '') : '');
   function itemCell(r) {
     return C_('item', 'Item', icon(r.type), h('span', { class: 'name' }, r.name, r.twin && h('span', { class: 'twin' }, num(r.total) + '-unit order')));
   }
@@ -1000,12 +1010,14 @@
   }
   function restockView(m) {
     const offered = m.restock.filter(r => r.bid != null && r.want && !r.thin);
+    const newest = offered.filter(r => r.copied && !r.copied.moved).reduce((a, r) => (!a || r.copied.at > a.copied.at ? r : a), null);
+    if (newest) newest.copied.last = true;
     return h('div', { class: 'block' },
       h('div', { class: 'block-head' }, h('h3', null, 'Restock shortlist'), h('span', { class: 'why' }, C.restock.days + ' days of stock or less, selling at least ' + C.restock.minWeek + ' a week'),
         offered.some(r => r.copied) ? h('span', null, offered.filter(r => r.copied && !r.copied.moved).length + ' of ' + offered.length + ' bids copied') : null),
       h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
         h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Line'), h('th', null, 'Left'), h('th', null, 'Sells a day'), h('th', null, 'Days left'), h('th', null, 'On the way'), h('th', null, 'Units to bid'), h('th', null, 'Net each'), h('th', null, 'Bid to type'))),
-        h('tbody', null, m.restock.map(r => h('tr', { class: r.copied && !r.copied.moved && offered.indexOf(r) >= 0 ? 'is-copied' : '' },
+        h('tbody', null, m.restock.map(r => h('tr', { class: r.copied && !r.copied.moved && offered.indexOf(r) >= 0 ? 'is-copied' + (r.copied.last ? ' is-last' : '') : '' },
           h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), h('span', null, r.name, h('span', { class: 'sub' }, r.hub)))),
           h('td', { class: r.left ? '' : 'neg' }, r.left ? num(r.left) : 'Sold out'),
           h('td', null, r.perDay.toFixed(1)), h('td', null, r.left ? r.days.toFixed(1) : ''),

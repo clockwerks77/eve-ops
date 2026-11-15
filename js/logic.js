@@ -136,6 +136,7 @@
       else if (!ctx.isJita && ctx.jitaSell != null && front <= ctx.jitaSell) { action = 'hold'; reason = 'Front is at or below the Jita sell price.'; }
       else if (drop > ctx.bigMove) { action = 'optional'; kind = 'big'; reason = 'Front is ' + Math.round(drop * 1000) / 10 + '% under you. Dump or repricing: your call.'; }
       else if (units <= ctx.sniperUnits) { action = 'optional'; kind = 'sniper'; reason = 'Sniper: ' + reason + '.'; }
+      else if (ctx.slowDays) { action = 'optional'; kind = 'slow'; reason = 'No sale here in ' + ctx.slowDays + ' days: is staying in front worth the fee? Your call.'; }
       for (const g of live) {
         if (action === 'hold') out.set(g.order.order_id, holdAt(g, reason));
         else if (g.pos.price <= target) out.set(g.order.order_id, holdAt(g, 'Already under the front.'));

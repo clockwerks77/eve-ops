@@ -172,12 +172,23 @@ button { font: inherit; color: inherit; }
   content: ""; display: inline-block; width: 0.28em; height: 0.56em; margin: 0 0.5em 0.06em 0.1em;
   border: solid var(--lead); border-width: 0 0.13em 0.13em 0; transform: rotate(45deg);
 }
-/* width 0 + min-width 100%: the note wraps to the button's width and never widens its column */
-.mark { display: block; width: 0; min-width: 100%; margin-top: 0.2rem; color: var(--dim); font-size: 0.86em; line-height: 1.25; white-space: normal; }
-.mark.is-last { color: var(--ink); font-weight: 500; }
-.mark.is-missed { color: var(--warn); }
-.unmark { background: none; border: 0; padding: 0 0 0 0.3rem; color: var(--calm); text-decoration: underline; text-underline-offset: 0.15em; cursor: pointer; font-weight: 400; }
+/* the mark adds no line: the time sits on the button's top border, like a legend; pressing it removes the mark */
+.pm { position: relative; display: inline-block; }
+.tag {
+  position: absolute; top: 0; right: 0.4rem; transform: translateY(-60%); background: var(--hull); border: 0; padding: 0 0.3rem;
+  color: var(--dim); font-size: 0.78rem; font-weight: 500; line-height: 1.15; white-space: nowrap; cursor: pointer;
+}
+.tag .x { margin-left: 0.35rem; opacity: 0.75; }
+.tag:hover { color: var(--ink); }
+.tag.is-warn { color: var(--warn); }
+.tag.is-last { color: var(--lead); font-weight: 600; }
+.why-warn { color: var(--warn); }
+/* the last price copied: where you are in the pass */
+.is-last .price.is-done { border-color: color-mix(in srgb, var(--lead) 60%, transparent); color: var(--ink); }
+.row.is-last > .item { position: relative; }
+.row.is-last > .item::after { content: ""; position: absolute; left: -0.6rem; top: 0.1rem; bottom: 0.1rem; width: 3px; border-radius: 2px; background: var(--lead); }
 .row.is-copied .name, tr.is-copied .pi-item { color: var(--dim); font-weight: 400; }
+.row.is-copied.is-last .name, tr.is-copied.is-last .pi-item { color: var(--ink); }
 
 /* rows that need nothing recede, so the ones to change stand out */
 .row.is-hold .yours, .row.is-hold .front, .row.is-hold .left, .row.is-hold .net, .row.is-hold .pace,

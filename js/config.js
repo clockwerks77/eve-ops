@@ -56,6 +56,9 @@ window.EVEOPS_CONFIG = {
   // A price change bigger than this share of your price is flagged "Big move" for you to judge
   // (dump or repricing?) instead of being listed as a routine change.
   bigMove: 0.02,
+  // A sell line with no sale at its hub for this many days, on stock bought longer ago than that, is not urged to
+  // "Change": the price is still offered, as "Slow line", because each change costs a fee the line may not earn back.
+  slowFee: { days: 7 },
   // "Copied" marks on the price buttons: after `grace` seconds of newer market data with the old price still showing,
   // a copied price is reported as not in the book; marks are dropped after `keepHours`.
   copied: { grace: 180, keepHours: 6 },

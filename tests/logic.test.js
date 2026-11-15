@@ -341,3 +341,20 @@ test('copied marks: waiting, landed, not in the book, and a book that moved', ()
   // nothing to type any more (rival gone) is not a moved book
   assert.equal(L.copyState(mark, { live: 1323000, target: null, dataAt: at + 30000, grace }).moved, false);
 });
+
+test('slow line: a routine undercut on a line with no sales is offered, not urged', () => {
+  const order = { order_id: 1, price: 1000000, volume_remain: 10, issued: '2026-11-01T00:00:00Z', location_id: 5, is_buy_order: false };
+  const rival = { order_id: 2, price: 999000, volume_remain: 50, issued: '2026-11-10T00:00:00Z', location_id: 5, is_buy_order: false };
+  const pos = L.sellPosition(order, [order, rival], new Set([1]), true);
+  const ctx = { cost: 800000, jitaSell: 700000, isJita: false, netMult: 0.95125, modify: 0.0039, sniperUnits: 5, bigMove: 0.02 };
+  assert.equal(L.planSells([{ order, pos }], ctx).get(1).action, 'tick');
+  const slow = L.planSells([{ order, pos }], Object.assign({ slowDays: 7 }, ctx)).get(1);
+  assert.equal(slow.action, 'optional'); assert.equal(slow.kind, 'slow'); assert.equal(slow.target, 998900);
+  assert.equal(Math.round(slow.fee), Math.round(998900 * 10 * 0.0039));
+  // a sniper or a big move keeps its own name, and a hold stays a hold
+  const few = Object.assign({}, rival, { volume_remain: 3 });
+  assert.equal(L.planSells([{ order, pos: L.sellPosition(order, [order, few], new Set([1]), true) }], Object.assign({ slowDays: 7 }, ctx)).get(1).kind, 'sniper');
+  const deep = Object.assign({}, rival, { price: 900000 });
+  assert.equal(L.planSells([{ order, pos: L.sellPosition(order, [order, deep], new Set([1]), true) }], Object.assign({ slowDays: 7 }, ctx)).get(1).kind, 'big');
+  assert.equal(L.planSells([{ order, pos }], Object.assign({ slowDays: 7 }, ctx, { cost: 990000 })).get(1).action, 'hold');
+});
