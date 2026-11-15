@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.text.TextUtils
 import android.view.ViewGroup
 import android.webkit.WebResourceError
@@ -106,6 +107,8 @@ class MainActivity : Activity(), Bridge.Host {
     override fun onResume() {
         super.onResume()
         web.onResume()
+        // Back from Android's question about notifications, or from its settings: the page looks again at what is allowed.
+        if (linked) web.evaluateJavascript("window.dispatchEvent(new Event('eveops-resume'))", null)
     }
 
     override fun onPause() {
@@ -195,6 +198,14 @@ class MainActivity : Activity(), Bridge.Host {
         // Android 13 and newer ask the owner once; before that an app may notify unless it has been switched off in settings.
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
+        }
+    }
+
+    override fun openNotificationSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+        } catch (e: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
         }
     }
 

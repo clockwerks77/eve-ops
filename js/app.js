@@ -1818,6 +1818,7 @@
       try { if (await loadLocation()) { await loadRoutes(); paint(); } } catch (err) { /* next tick */ }
     }, 15000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { wake(); syncNow(); notifyState(false); run(); } });
+    window.addEventListener('eveops-resume', () => notifyState(false));     // the app came back to the front, perhaps from Android's question or its settings
   }
   boot();
 })();

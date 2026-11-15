@@ -92,6 +92,8 @@ class Headless(context: Context) {
 
                 override fun askNotifications() {}
 
+                override fun openNotificationSettings() {}
+
                 override fun snapshot(json: String, settled: Boolean) {
                     if (!settled) return          // the page is still loading: wait for the full picture
                     Snapshots.save(ctx, json)

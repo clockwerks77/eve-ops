@@ -1,10 +1,14 @@
 package io.github.clockwerks77.eveops
 
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
@@ -17,6 +21,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeFalse
 import org.junit.FixMethodOrder
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -128,5 +133,70 @@ class AppOnDeviceTest {
         assertNotNull("back at the sign-in screen", device.wait(Until.findObject(By.text("Log in with EVE")), 45_000))
         shot("after-refused-code")
         assertNotEquals("", state)
+    }
+
+    /** A summary as the page hands it over, with every kind of notification asked for and these orders to change. */
+    private fun summary(vararg orders: String): String {
+        val alerts = orders.map { """{"id":"$it","kind":"change","text":"Dodixie: order $it"}""" } +
+            """{"id":"x40150003:1","kind":"extractors","text":"Alakgur III"}"""
+        return """{"v":1,"notify":{"change":true,"extractors":true,"launchpad":true},"alerts":[${alerts.joinToString(",")}]}"""
+    }
+
+    private fun titles(nm: NotificationManager): Set<String> =
+        nm.activeNotifications.map { it.notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString() }.toSet()
+
+    @Test
+    fun d_androidAsksBeforeTheAppMayNotify() {
+        assumeFalse("this emulator already allows notifications from the app", Alerts.allowed(ctx))
+        start(Intent(Intent.ACTION_VIEW, Uri.parse("eveops://open?view=demo"), ctx, MainActivity::class.java))
+        var activity: MainActivity? = null
+        assertTrue("the dashboard is on screen", waitFor(30) {
+            instrumentation.runOnMainSync {
+                activity = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                    .filterIsInstance<MainActivity>().firstOrNull()
+            }
+            activity != null
+        })
+        // what the page's Phone notifications panel sets off when a box is ticked or "Ask Android to allow them" is pressed
+        instrumentation.runOnMainSync { activity!!.askNotifications() }
+        val allow = device.wait(Until.findObject(By.res("com.android.permissioncontroller", "permission_allow_button")), 20_000)
+        shot("notify-question")
+        assertNotNull("Android puts its question about notifications", allow)
+        allow.click()
+        assertTrue("and once allowed, the app may notify", waitFor(10) { Alerts.allowed(ctx) })
+    }
+
+    @Test
+    fun e_eachNewThingIsNotifiedOnce() {
+        if (!Alerts.allowed(ctx)) instrumentation.uiAutomation.grantRuntimePermission(ctx.packageName, "android.permission.POST_NOTIFICATIONS")
+        assertTrue("Android allows notifications from the app", waitFor(10) { Alerts.allowed(ctx) })
+        device.pressHome()
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.cancelAll()
+        ctx.getSharedPreferences("alerts", Context.MODE_PRIVATE).edit().clear().commit()
+
+        instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2"), false) }
+        assertTrue("orders and extractors each get a notification", waitFor(10) { nm.activeNotifications.size == 2 })
+        assertEquals(setOf("2 orders to change", "Extractors stopped on 1 colony"), titles(nm))
+        device.openNotification()
+        assertTrue("and it shows in the notification shade", seen("2 orders to change", 15))
+        shot("notifications")
+        device.pressHome()
+
+        // the next check finds the same things: nothing more to say
+        nm.cancelAll()
+        instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2"), false) }
+        Thread.sleep(1500)
+        assertEquals("the same things are not told twice", 0, nm.activeNotifications.size)
+        // seen on the dashboard itself: nothing is posted, and it counts as told
+        instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2", "c3"), true) }
+        instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2", "c3"), false) }
+        Thread.sleep(1500)
+        assertEquals("what was on screen is not told again", 0, nm.activeNotifications.size)
+        // one more order loses the lead while the app is closed: only that is news
+        instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2", "c3", "c4"), false) }
+        assertTrue("a new order is told", waitFor(10) { nm.activeNotifications.size == 1 })
+        assertEquals(setOf("1 order to change"), titles(nm))
+        nm.cancelAll()
     }
 }

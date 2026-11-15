@@ -30,6 +30,9 @@ class Bridge(context: Context, private val host: Host) {
 
         /** The owner turned a notification on: Android may need to ask whether the app may post them. */
         fun askNotifications()
+
+        /** Open Android's own notification settings for this app, for when its question is no longer offered. */
+        fun openNotificationSettings()
     }
 
     private val ctx = context.applicationContext
@@ -95,8 +98,11 @@ class Bridge(context: Context, private val host: Host) {
             "notify" -> {
                 val allowed = Alerts.allowed(ctx)
                 if (m.optBoolean("ask") && !allowed) host.askNotifications()
-                answer(reply, rpc, JSONObject().put("allowed", allowed))
+                // "settings": this build can open Android's notification settings for the app (the op below)
+                answer(reply, rpc, JSONObject().put("allowed", allowed).put("settings", true))
             }
+
+            "notify-settings" -> host.openNotificationSettings()
 
             "copy" -> {
                 val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
