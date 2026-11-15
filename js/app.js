@@ -104,7 +104,8 @@
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, wantWake: false, wake: null,
-    prices: new Map(), tab: null, follow: true, hist: new Map(), piNear: null, piFrom: null,
+    prices: new Map(), tab: null, follow: true, hist: new Map(), piNear: null, piFrom: null, history: [],
+    seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
   const me = () => '/characters/' + S.who.id;
   function feed(name, entry) { S.feeds[name] = { at: entry.modified, next: entry.expires, err: null }; }
@@ -129,7 +130,35 @@
     return moved;
   }
   async function loadWallet() { const r = await E.get(me() + '/wallet/', { auth: true }); S.wallet = r.data; feed('Wallet', r); }
-  async function loadOrders() { const r = await E.get(me() + '/orders/', { auth: true }); S.orders = r.data; S.ordersAt = r.modified; feed('Your orders', r); }
+  async function loadOrders() {
+    const r = await E.get(me() + '/orders/', { auth: true }); S.orders = r.data; S.ordersAt = r.modified; feed('Your orders', r);
+    S.history = await E.get(me() + '/orders/history/', { auth: true }).then(x => x.data, () => S.history);
+  }
+  const hubOf = new Map(C.hubs.map(hb => [hb.station, hb]));
+  /** Stock of items you trade, sitting loose in a station hangar. Map type -> units. */
+  function hangarAt(station) {
+    const traded = new Set(S.orders.map(o => o.type_id));
+    S.tx.forEach(t => traded.add(t.type_id));
+    const m = new Map();
+    for (const a of S.assets) {
+      if (a.location_id !== station || a.location_type !== 'station' || a.location_flag !== 'Hangar' || a.is_singleton) continue;
+      if (!traded.has(a.type_id) || C.excludeTypes.indexOf(a.type_id) >= 0) continue;
+      m.set(a.type_id, (m.get(a.type_id) || 0) + a.quantity);
+    }
+    return m;
+  }
+  /** Lines that sold in the last 7 days at a hub and have nothing listed there now. Map "station:type" -> units sold. */
+  function soldOut(now) {
+    const open = new Set(S.orders.filter(o => !o.is_buy_order).map(o => o.location_id + ':' + o.type_id));
+    const m = new Map();
+    for (const t of S.tx) {
+      if (t.is_buy || now - Date.parse(t.date) > 7 * D || !hubOf.has(t.location_id)) continue;
+      if (C.excludeTypes.indexOf(t.type_id) >= 0 || C.zeroCostTypes.indexOf(t.type_id) >= 0) continue;
+      const k = t.location_id + ':' + t.type_id;
+      if (!open.has(k)) m.set(k, (m.get(k) || 0) + t.quantity);
+    }
+    return m;
+  }
   async function loadTx() {
     const first = await E.get(me() + '/wallet/transactions/', { auth: true });
     let all = first.data.slice(), page = first.data;
@@ -217,6 +246,14 @@
       if (!o.is_buy_order) want.set(C.jita.region + ':' + o.type_id, [C.jita.region, o.type_id]);
     }
     for (const p of S.planets) if (p.product) for (const hb of C.hubs) want.set(hb.region + ':' + p.product, [hb.region, p.product]);
+    const waiting = Array.from(hangarAt(C.jita.station).keys());
+    for (const type of waiting) for (const hb of C.hubs) want.set(hb.region + ':' + type, [hb.region, type]);
+    for (const k of soldOut(Date.now()).keys()) {
+      const p = k.split(':').map(Number);
+      want.set(hubOf.get(p[0]).region + ':' + p[1], [hubOf.get(p[0]).region, p[1]]);
+      want.set(C.jita.region + ':' + p[1], [C.jita.region, p[1]]);
+    }
+    await Promise.all(waiting.map(t => typeInfo(t).catch(() => {})));
     let oldest = Infinity, soonest = Infinity, failed = 0;
     await Promise.all(Array.from(want, async ([key, rt]) => {
       try {
@@ -348,6 +385,33 @@
       return p.length ? Math.min.apply(null, p) : null;
     };
 
+    const ask = (type, hb) => {
+      const b = S.books.get(hb.region + ':' + type);
+      if (!b) return null;
+      const px = b.orders.filter(o => !o.is_buy_order && o.location_id === hb.station && !myIds.has(o.order_id)).map(o => o.price);
+      return px.length ? Math.min.apply(null, px) : null;
+    };
+    const hubName = id => (hubOf.get(id) || {}).name || ((K.systems[(K.stations[id] || {}).system] || {}).name) || 'another station';
+    // restock: what is already on the way, and the bid that would lead in Jita
+    const onBid = new Map();
+    for (const o of S.orders) if (o.is_buy_order) onBid.set(o.type_id, (onBid.get(o.type_id) || 0) + o.volume_remain);
+    const jitaHang = hangarAt(C.jita.station);
+    const jitaBid = type => {
+      const b = S.books.get(C.jita.region + ':' + type);
+      if (!b) return null;
+      const px = b.orders.filter(o => o.is_buy_order && !myIds.has(o.order_id) && (o.location_id === C.jita.station || o.range === 'region')).map(o => o.price);
+      return px.length ? L.tickAbove(Math.max.apply(null, px)) : null;
+    };
+    const restock = [];
+    const consider = (type, loc, left, d7, hubPrice) => {
+      if (zero.has(type) || d7 < C.restock.minWeek || loc === C.jita.station) return;
+      const days = left / (d7 / 7);
+      if (days > C.restock.days) return;
+      const bid = jitaBid(type), coming = (onBid.get(type) || 0) + (jitaHang.get(type) || 0);
+      const net = bid != null && hubPrice != null ? hubPrice * NET - bid : null;
+      restock.push({ type, name: nameOf(type), hub: hubName(loc), left, perDay: d7 / 7, days, bid, coming, want: Math.max(0, Math.round(d7) - left - coming), net, margin: net != null && bid ? net / bid : null });
+    };
+
     // pins that have served their purpose
     let pinsChanged = false;
     for (const id of Object.keys(S.pins)) {
@@ -399,6 +463,7 @@
           pin: pinOf(x.order.order_id, price),
         });
       }
+      consider(o0.type_id, o0.location_id, left, v.d7, g.reduce((m, x) => Math.min(m, x.pos ? x.pos.price : x.order.price), Infinity));
       const lastBuy = led.lastBuy.get(o0.type_id) || 0;
       const quiet = windowDays >= C.staleDays && now - v.last > C.staleDays * D && now - lastBuy > C.staleDays * D;
       const clear = v.d7 > 0 ? left / (v.d7 / 7) : null;
@@ -483,12 +548,6 @@
     }
     const wealth = S.wallet == null ? null : S.wallet + escrow + listed + held;
 
-    const ask = (type, hb) => {
-      const b = S.books.get(hb.region + ':' + type);
-      if (!b) return null;
-      const px = b.orders.filter(o => !o.is_buy_order && o.location_id === hb.station && !myIds.has(o.order_id)).map(o => o.price);
-      return px.length ? Math.min.apply(null, px) : null;
-    };
     const sellHub = C.hubs.find(x => x.station === C.pi.sellStation) || C.hubs[0];
     const colonies = S.planets.filter(p => p.product && p.units).map(p => {
       const asks = C.hubs.map(hb => ask(p.product, hb));
@@ -507,6 +566,60 @@
     };
     if (pi) pi.go = pi.full >= 0.85 ? 'full' : pi.value >= C.pi.worth ? 'worth' : 'wait';
 
+    // ---- restock: lines that sold out this week with nothing listed there now
+    for (const e of soldOut(now)) {
+      const p = e[0].split(':').map(Number);
+      consider(p[1], p[0], 0, e[1], ask(p[1], hubOf.get(p[0])));
+    }
+    restock.sort((a, b) => a.days - b.days || (b.net || 0) * b.perDay - (a.net || 0) * a.perDay);
+
+    // ---- haul manifest: what is waiting in the Jita hangar and where each item sells
+    const away = C.hubs.filter(hb => hb.station !== C.jita.station);
+    const haulRows = Array.from(jitaHang, e => {
+      const asks = away.map(hb => ({ name: hb.name, ask: ask(e[0], hb), sold: (vel.get(e[0] + ':' + hb.station) || {}).d7 || 0 }));
+      const proven = asks.filter(a => a.ask != null && a.sold > 0);
+      const pool = proven.length ? proven : asks.filter(a => a.ask != null);
+      const best = pool.length ? pool.reduce((a, b) => (b.ask > a.ask ? b : a)) : null;
+      return { type: e[0], name: nameOf(e[0]), qty: e[1], m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks, best: best ? best.name : null };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    const haul = { rows: haulRows, units: sum(haulRows, r => r.qty), m3: sum(haulRows, r => r.m3), cargo: S.cargo };
+
+    // ---- what changed since the baseline ("Mark as seen")
+    const snapshot = {};
+    for (const st of list) for (const r of st.sells.concat(st.bids)) snapshot[r.id] = { t: r.type, l: st.id, b: st.bids.indexOf(r) >= 0, s: r.pos ? r.pos.status : '' };
+    if (!S.seen && Object.keys(snapshot).length && S.books.size) { S.seen = { at: now - D, orders: snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); }
+    const changes = [];
+    if (S.seen) {
+      const groupsTx = new Map();
+      for (const t of S.tx) {
+        const when = Date.parse(t.date);
+        if (when <= S.seen.at || C.excludeTypes.indexOf(t.type_id) >= 0) continue;
+        const k = (t.is_buy ? 'b' : 's') + ':' + t.location_id + ':' + t.type_id;
+        const g = groupsTx.get(k) || { buy: t.is_buy, loc: t.location_id, type: t.type_id, qty: 0, isk: 0, at: 0, net: null };
+        g.qty += t.quantity; g.isk += t.quantity * t.unit_price; g.at = Math.max(g.at, when);
+        groupsTx.set(k, g);
+      }
+      for (const x of led.sales) {
+        const g = x.date > S.seen.at && x.net != null ? groupsTx.get('s:' + x.location_id + ':' + x.type_id) : null;
+        if (g) g.net = (g.net || 0) + x.net;
+      }
+      for (const g of groupsTx.values()) changes.push({ rank: 2, at: g.at, type: g.type, tone: g.buy ? 'calm' : 'lead',
+        text: (g.buy ? 'Bought ' : 'Sold ') + num(g.qty) + ' ' + nameOf(g.type) + ' at ' + hubName(g.loc) + ' for ' + L.short(g.isk),
+        sub: g.buy ? null : g.net != null ? 'net ' + L.short(g.net) : 'no cost on record' });
+      const closed = new Map(S.history.map(o => [o.order_id, o]));
+      for (const id of Object.keys(S.seen.orders)) {
+        const was = S.seen.orders[id], cur = snapshot[id];
+        if (!cur) {
+          const gone = closed.get(Number(id));
+          const what = !gone ? 'Closed' : gone.volume_remain === 0 ? (was.b ? 'Bid filled' : 'Sold out') : gone.state === 'cancelled' ? 'Cancelled' : 'Expired with ' + num(gone.volume_remain) + ' left';
+          changes.push({ rank: /Expired/.test(what) ? 0 : 1, at: 0, type: was.t, tone: /Expired/.test(what) ? 'bad' : 'lead', text: what + ': ' + nameOf(was.t) + ' at ' + hubName(was.l), sub: gone ? num(gone.volume_total) + '-unit order' : null });
+        } else if (was.s === 'leading' && (cur.s === 'undercut' || cur.s === 'behind' || cur.s === 'outbid')) {
+          changes.push({ rank: 0, at: 0, type: was.t, tone: 'warn', text: (cur.b ? 'Outbid: ' : 'Undercut: ') + nameOf(was.t) + ' at ' + hubName(was.l), sub: 'was leading when you last looked' });
+        }
+      }
+      changes.sort((a, b) => a.rank - b.rank || b.at - a.at);
+    }
+
     // which hub tab is showing: follow the character on arrival, otherwise leave the choice alone
     const at = list.find(s => s.docked) || list.find(s => s.inSystem);
     if (S.follow && at) { S.tab = at.id; S.follow = false; }
@@ -514,6 +627,7 @@
 
     return {
       now, stops: list, slow: slow.slice(0, 8), tab: S.tab, pi,
+      restock: restock.slice(0, 12), haul, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
       wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
@@ -664,7 +778,9 @@
           s.pinned ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => unpin(s) }, 'Clear pins') : null)),
       s.sells.length ? h('div', { class: 'rows' }, head(['Sell orders', 'Left', 'Your price', 'Front of book', 'Call', 'Type this', 'Net each', 'Sold']), s.sells.map(sellRow)) : null,
       s.bids.length ? h('div', { class: 'rows' }, head(['Buy orders', 'Filled', 'Your bid', 'Bids above you', 'Call', 'Type this', 'In escrow', 'Expires']), s.bids.map(bidRow)) : null,
-      s.hangar.length ? h('p', { class: 'hangar' }, h('span', { class: 'hangar-label' }, s.id === C.jita.station ? 'In the hangar to collect' : 'In the hangar, not listed'),
+      s.id === C.jita.station && m.haul.rows.length ? haulView(m) : null,
+      s.id === C.jita.station && m.restock.length ? restockView(m) : null,
+      s.hangar.length && s.id !== C.jita.station ? h('p', { class: 'hangar' }, h('span', { class: 'hangar-label' }, 'In the hangar, not listed'),
         s.hangar.map(x => h('span', { class: 'hangar-item' }, x.name + ' ×' + num(x.qty)))) : null);
   }
 
@@ -677,8 +793,52 @@
         h('span', { class: 'tab-name' }, s.short),
         h('span', { class: 'tab-sub' }, where),
         h('span', { class: 'tab-count' + (s.change || s.check ? '' : ' is-zero') }, (s.check ? s.check + ' to check' + (s.change ? ', ' : '') : '') + (s.change ? s.change + ' to change' : s.check ? '' : 'Nothing to change')),
-        m.pi && m.pi.near && isFinite(m.pi.near.jumps) && m.pi.near.station === s.id && m.pi.go !== 'wait' ? h('span', { class: 'tab-pi' }, 'Planetary pickup') : null);
+        m.pi && m.pi.near && isFinite(m.pi.near.jumps) && m.pi.near.station === s.id && m.pi.go !== 'wait' ? h('span', { class: 'tab-pi' }, 'Planetary pickup') : null,
+        s.id === C.jita.station && (m.restock.length || m.haul.rows.length) ? h('span', { class: 'tab-pi' }, [m.haul.rows.length ? plural(m.haul.units, 'unit') + ' to haul' : null, m.restock.length ? m.restock.length + ' to restock' : null].filter(Boolean).join(', ')) : null);
     }));
+  }
+
+  const priceBtn = price => h('button', { class: 'price', type: 'button', title: 'Copy ' + price, onclick: e => copy(e.currentTarget, price) }, L.isk(price));
+  function haulView(m) {
+    const hl = m.haul, over = hl.m3 > hl.cargo;
+    return h('div', { class: 'block' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Haul manifest'),
+        h('span', { class: over ? 'neg' : '' }, plural(hl.units, 'unit') + ', ' + num(Math.round(hl.m3)) + ' m³ of '),
+        h('label', { class: 'cargo' }, h('input', { type: 'number', min: 0, step: 1, value: hl.cargo, 'aria-label': 'Cargo hold in cubic metres',
+          onchange: e => { S.cargo = Math.max(0, Number(e.target.value) || 0); if (!demo) E.store.set('eveops.cargo', S.cargo); paint(); } }), ' m³ cargo'),
+        over && h('span', { class: 'chip chip-check' }, 'Over by ' + num(Math.round(hl.m3 - hl.cargo)) + ' m³')),
+      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+        h('thead', null, h('tr', null, h('th', { class: 'l' }, 'In the Jita hangar'), h('th', null, 'Units'), h('th', null, 'm³'), hl.rows[0].asks.map(a => h('th', null, a.name)), h('th', null, 'Take to'))),
+        h('tbody', null, hl.rows.map(r => h('tr', null,
+          h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), r.name)),
+          h('td', null, num(r.qty)), h('td', null, num(Math.round(r.m3))),
+          r.asks.map(a => h('td', { class: a.name === r.best ? 'best' : '' }, a.ask == null ? '' : L.isk(a.ask), a.sold ? h('span', { class: 'sub' }, 'you sold ' + num(a.sold) + ' this week') : null)),
+          h('td', { class: 'best' }, r.best || '')))))),
+      h('p', { class: 'note' }, 'Hub columns are the lowest ask there now. "Take to" prefers a hub where you sold this item in the last 7 days, then the highest ask.'));
+  }
+  function restockView(m) {
+    return h('div', { class: 'block' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Restock shortlist'), h('span', { class: 'why' }, C.restock.days + ' days of stock or less, selling at least ' + C.restock.minWeek + ' a week')),
+      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+        h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Line'), h('th', null, 'Left'), h('th', null, 'Sells a day'), h('th', null, 'Days left'), h('th', null, 'On the way'), h('th', null, 'Units to bid'), h('th', null, 'Net each'), h('th', null, 'Bid to type'))),
+        h('tbody', null, m.restock.map(r => h('tr', null,
+          h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), h('span', null, r.name, h('span', { class: 'sub' }, r.hub)))),
+          h('td', { class: r.left ? '' : 'neg' }, r.left ? num(r.left) : 'Sold out'),
+          h('td', null, r.perDay.toFixed(1)), h('td', null, r.left ? r.days.toFixed(1) : ''),
+          h('td', null, r.coming ? num(r.coming) : ''),
+          h('td', null, r.want ? num(r.want) : h('span', { class: 'sub' }, 'covered')),
+          h('td', null, r.net == null ? '' : [h('span', { class: r.net < 0 ? 'neg' : '' }, L.short(r.net)), h('span', { class: 'sub' }, Math.round(r.margin * 100) + '%')]),
+          h('td', null, r.bid != null && r.want ? priceBtn(r.bid) : '')))))),
+      h('p', { class: 'note' }, 'Units to bid is a week of your sales less what is left, already on bid, or waiting in the Jita hangar. The bid is one legal tick over the top Jita bid; net each is at the hub price after fees.'));
+  }
+  function feedPanel(m) {
+    const mark = () => { S.seen = { at: Date.now(), orders: m.snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); paint(); };
+    return h('section', { class: 'panel' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Since you last looked'), m.changes.length ? h('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: mark }, 'Mark as seen') : null),
+      m.changes.length ? h('ul', { class: 'feed' }, m.changes.slice(0, 10).map(c => h('li', { class: 'tone-' + c.tone }, h('span', null, c.text), c.sub && h('span', { class: 'sub' }, c.sub))),
+        m.changes.length > 10 ? h('li', { class: 'sub' }, 'and ' + (m.changes.length - 10) + ' more') : null)
+        : h('p', { class: 'note' }, 'Nothing new.'),
+      m.seenAt && h('p', { class: 'note' }, 'Counting from ', live('ago', m.seenAt), '.'));
   }
 
   function piView(m) {
@@ -836,7 +996,7 @@
       topView(m),
       m ? h('main', { class: 'board' },
         h('div', { class: 'stops' }, m.stops.length ? [tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m)]),
-        h('aside', { class: 'side' }, weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), clonePanel(m), slowPanel(m), dataPanel()))
+        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), clonePanel(m), slowPanel(m), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);
   }

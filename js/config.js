@@ -44,6 +44,11 @@ window.EVEOPS_CONFIG = {
   // Planetary products are sold at zero cost basis.
   zeroCostTypes: [2329, 3693, 9830, 9832, 2312, 3775],
 
+  // Restock shortlist: lines with this many days of stock or fewer, that sold at least minWeek units in 7 days.
+  restock: { days: 4, minWeek: 5 },
+  // Hauler cargo in m3 (the fitted figure; change it on the page whenever the fit changes).
+  haul: { cargo: 11016 },
+
   // An undercut of this many units or fewer is a sniper: the price is offered, not urged.
   sniperUnits: 5,
   // A price change bigger than this share of your price is flagged "Big move" for you to judge

@@ -95,6 +95,10 @@
     const pick = sells[Math.floor(rnd() * sells.length)];
     tx.push({ transaction_id: tid++, date: iso(d * D), type_id: pick[0], location_id: pick[1], quantity: 2 + Math.floor(rnd() * 14), unit_price: pick[4], is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
   }
+  // a fast line that is about to run out, and one that sold out
+  for (let i = 0; i < 6; i++) tx.push({ transaction_id: tid++, date: iso((0.3 + i * 0.5) * D), type_id: 2488, location_id: ST.dodixie, quantity: 26, unit_price: 421300, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
+  for (let i = 0; i < 4; i++) tx.push({ transaction_id: tid++, date: iso((0.4 + i * 0.9) * D), type_id: 380, location_id: ST.rens, quantity: 12, unit_price: 512000, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
+  rival(REGION[ST.rens], 380, ST.rens, false, 515000, 14, 5 * H);
   tx.push({ transaction_id: tid++, date: iso(1.2 * D), type_id: 2329, location_id: ST.hek, quantity: 1400, unit_price: 9150, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
   for (const [type, total, left, bid, rivals] of bids) {
     const mine = { order_id: oid++, type_id: type, location_id: ST.jita, region_id: 10000002, is_buy_order: true, price: bid, volume_remain: left, volume_total: total, issued: iso(type === 380 ? 3 * H : 40 * H), duration: type === 380 ? 1 : 90, range: 'station', escrow: bid * left, min_volume: 1, is_corporation: false };
@@ -130,6 +134,7 @@
     if (/\/wallet\/$/.test(path)) return answer(6072843112.37, 2 * M, 40e3);
     if (/\/wallet\/transactions\/$/.test(path)) return answer(q.from_id ? [] : tx, 60 * M, 22 * M);
     if (/\/characters\/\d+\/orders\/$/.test(path)) return answer(orders, 20 * M, 9 * M);
+    if (/\/orders\/history\/$/.test(path)) return answer([], 60 * M, 30 * M);
     if (/\/assets\/$/.test(path)) return answer([
       { item_id: 1, type_id: 527, quantity: 60, location_id: ST.jita, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 2, type_id: 2329, quantity: 1200, location_id: ST.hek, location_type: 'station', location_flag: 'Hangar', is_singleton: false },

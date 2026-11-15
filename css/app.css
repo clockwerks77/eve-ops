@@ -175,6 +175,16 @@ button { font: inherit; color: inherit; }
 .hangar-item { display: inline-block; margin-right: 1.2rem; }
 
 .pickup { margin-top: 0.6rem; font-size: 0.95rem; }
+.block { margin-top: 1.1rem; padding-top: 0.8rem; border-top: 1px solid var(--seam); }
+.block-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.9rem; }
+.block-head h3 { font-size: 1.1rem; font-weight: 600; margin: 0 0.3rem 0 0; }
+.cargo input { width: 5.5rem; background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; padding: 0.1rem 0.3rem; font: inherit; text-align: right; }
+.pi-table .price { font-size: 1.15em; padding: 0.2rem 0.45rem; }
+.pi-table td .sub { font-size: 0.8em; }
+.btn-small { padding: 0.1rem 0.55rem; font-size: 0.86rem; margin-left: auto; }
+.feed li { padding: 0.3rem 0 0.3rem 0.7rem; border-left: 3px solid var(--seam); margin-top: 0.35rem; font-size: 0.95rem; }
+.feed .tone-lead { border-left-color: var(--lead); } .feed .tone-warn { border-left-color: var(--warn); }
+.feed .tone-bad { border-left-color: var(--bad); } .feed .tone-calm { border-left-color: var(--calm); }
 
 /* planetary interaction: products, where they sell best, and whether a pickup is worth a stop */
 .pi { padding: 1rem var(--gap) 1.2rem; border-bottom: 1px solid var(--seam); }
