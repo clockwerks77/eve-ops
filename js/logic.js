@@ -364,6 +364,59 @@
     return { rows, run };
   }
 
+  // ---------------------------------------------------- sync between devices
+  /** JSON with every object's keys in order, so two equal documents give equal text. */
+  function stable(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+    if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+    return '{' + Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+  }
+  /**
+   * Joins two copies of the shared state (this device's and the one in the sync file). The order of the two does not matter
+   * and joining twice changes nothing, so every device ends with the same result.
+   *   pins, copied: entry by entry the newer wins; one removed by hand stays as { gone: true, at } so the removal travels;
+   *                 entries older than keep.pins / keep.copied (ms) are dropped.
+   *   seen ("Mark as seen"): the newer wins, and one set by hand beats the first-visit default.
+   *   weeks: a finished week's figures from whichever device fixed them first; exact journal figures from either;
+   *          "as last seen" from the later look; the tracker's figure and the carried-in figure by the newer entry.
+   */
+  function syncMerge(a, b, now, keep) {
+    a = a || {}; b = b || {};
+    const newer = (x, y) => (!x ? y || null : !y ? x : (x.at || 0) > (y.at || 0) ? x : (y.at || 0) > (x.at || 0) ? y : stable(x) >= stable(y) ? x : y);
+    const marks = (x, y, ttl) => {
+      const out = {};
+      for (const k of new Set(Object.keys(x || {}).concat(Object.keys(y || {})))) {
+        const e = newer((x || {})[k], (y || {})[k]);
+        if (e && now - (e.at || 0) <= ttl) out[k] = e;
+      }
+      return out;
+    };
+    const seen = (x, y) => (!x || !y ? x || y || null : !!x.auto !== !!y.auto ? (x.auto ? y : x) : newer(x, y));
+    const week = (x, y) => {
+      x = x || {}; y = y || {};
+      const out = {};
+      const f = x.frozenAt && y.frozenAt ? (x.frozenAt < y.frozenAt ? x : y.frozenAt < x.frozenAt ? y : stable(x) >= stable(y) ? x : y) : x.frozenAt ? x : y.frozenAt ? y : null;
+      if (f) for (const k of ['gross', 'units', 'net', 'uncovered', 'frozenAt']) if (f[k] != null) out[k] = f[k];
+      const exact = w => [w.fees, w.change, w.close];
+      const j = x.close != null && y.close != null ? (stable(exact(x)) >= stable(exact(y)) ? x : y) : x.close != null ? x : y.close != null ? y : null;
+      if (j) { out.fees = j.fees; out.change = j.change; out.close = j.close; }
+      const look = w => ({ at: w.seenAt || 0, escrow: w.escrow, wallet: w.wallet });
+      const sn = newer(look(x), look(y));
+      if (sn && sn.at) { out.escrow = sn.escrow; out.wallet = sn.wallet; out.seenAt = sn.at; }
+      const t = newer(x.tracker, y.tracker);
+      if (t) out.tracker = t;
+      return out;
+    };
+    const wa = a.weeks || {}, wb = b.weeks || {}, w = {};
+    for (const k of new Set(Object.keys(wa.w || {}).concat(Object.keys(wb.w || {})))) w[k] = week((wa.w || {})[k], (wb.w || {})[k]);
+    return {
+      v: 1,
+      pins: marks(a.pins, b.pins, keep.pins), copied: marks(a.copied, b.copied, keep.copied),
+      seen: seen(a.seen, b.seen),
+      weeks: { carried: newer(wa.carried, wb.carried), w },
+    };
+  }
+
   /**
    * The order to visit a few stops in for the fewest jumps, ending wherever that leaves you.
    * dist(a, b) gives the jumps between two stops, with 'start' for where you are now; null means no route, which rules that order out.
@@ -584,7 +637,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, journalSpan, tieOut, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
+    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, journalSpan, tieOut, stable, syncMerge, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

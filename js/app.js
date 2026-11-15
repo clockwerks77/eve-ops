@@ -502,20 +502,21 @@
       const bid = jitaBid(type), coming = (onBid.get(type) || 0) + (jitaHang.get(type) || 0);
       const net = bid != null && hubPrice != null ? hubPrice * NET - bid : null;
       const margin = net != null && bid ? net / bid : null;
-      const mk = S.copied['r' + type];
+      const mk = S.copied['r' + type] && !S.copied['r' + type].gone ? S.copied['r' + type] : null;
       restock.push({ type, name: nameOf(type), hub: hubName(loc), left, perDay: d7 / 7, days, bid, coming, want: Math.max(0, Math.round(d7) - left - coming), net, margin, thin: margin != null && margin < C.restock.minMargin,
         copied: mk ? { state: 'waiting', price: mk.price, at: mk.at, moved: bid != null && mk.price !== bid } : null });
     };
 
     // pins that have served their purpose
     let pinsChanged = false;
+    // Entries leave these lists by age alone (a removal by hand stays as { gone, at } until then), so that devices sharing them agree.
     for (const id of Object.keys(S.pins)) {
-      if (!myIds.has(Number(id)) || now - S.pins[id].at > 36 * H) { delete S.pins[id]; pinsChanged = true; }
+      if (now - S.pins[id].at > PIN_KEEP) { delete S.pins[id]; pinsChanged = true; }
     }
     const pinOf = (id, livePrice) => {
       const p = S.pins[id];
-      if (!p) return null;
-      if (livePrice === p.price && now - p.at > 6 * H) { delete S.pins[id]; pinsChanged = true; return null; }
+      if (!p || p.gone) return null;
+      if (livePrice === p.price && now - p.at > 6 * H) return null;      // shown in the book for six hours: the pin has done its job
       return { price: p.price, at: p.at, done: livePrice === p.price };
     };
 
@@ -523,10 +524,10 @@
     // Keys are order IDs; 'r' + type ID for a bid on the restock shortlist.
     let marksChanged = false;
     for (const id of Object.keys(S.copied)) {
-      if ((id[0] !== 'r' && !myIds.has(Number(id))) || now - S.copied[id].at > C.copied.keepHours * H) { delete S.copied[id]; marksChanged = true; }
+      if (now - S.copied[id].at > C.copied.keepHours * H) { delete S.copied[id]; marksChanged = true; }
     }
     const typed = (plan, pin) => (pin && !pin.done ? pin.price : (plan.action === 'tick' || plan.action === 'optional') ? plan.target : null);
-    const markOf = (id, live, plan, pin, book) => L.copyState(S.copied[id], { live, target: typed(plan, pin), dataAt: Math.max(book ? book.modified : 0, S.ordersAt), grace: C.copied.grace * 1000 });
+    const markOf = (id, live, plan, pin, book) => L.copyState(S.copied[id] && !S.copied[id].gone ? S.copied[id] : null, { live, target: typed(plan, pin), dataAt: Math.max(book ? book.modified : 0, S.ordersAt), grace: C.copied.grace * 1000 });
 
     const stops = new Map();
     const stop = id => { if (!stops.has(id)) stops.set(id, { id, sells: [], bids: [], hangar: [] }); return stops.get(id); };
@@ -852,7 +853,7 @@
     // ---- what changed since the baseline ("Mark as seen")
     const snapshot = {};
     for (const st of list) for (const r of st.sells.concat(st.bids)) snapshot[r.id] = { t: r.type, l: st.id, b: st.bids.indexOf(r) >= 0, s: r.pos ? r.pos.status : '' };
-    if (!S.seen && Object.keys(snapshot).length && S.books.size) { S.seen = { at: now - D, orders: snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); }
+    if (!S.seen && Object.keys(snapshot).length && S.books.size) { S.seen = { at: now - D, orders: snapshot, auto: true }; if (!demo) E.store.set('eveops.seen', S.seen); }
     const changes = [];
     if (S.seen) {
       const groupsTx = new Map();
@@ -937,8 +938,8 @@
     if (!navigator.clipboard) return;
     navigator.clipboard.writeText(String(price)).then(done, () => {});
   }
-  function saveMarks() { if (!demo) E.store.set('eveops.copied', S.copied); paint(); }
-  function unmark(keys) { keys.forEach(k => { delete S.copied[k]; }); saveMarks(); }
+  function saveMarks() { if (!demo) E.store.set('eveops.copied', S.copied); syncSoon(); paint(); }
+  function unmark(keys) { const at = Date.now(); keys.forEach(k => { S.copied[k] = { gone: true, at }; }); saveMarks(); }
   const hhmm = ms => new Date(ms).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false });
   /**
    * The price button and, once pressed, its mark. The mark adds no line: the time sits on the button's top border
@@ -1164,7 +1165,7 @@
       h('p', { class: 'note' }, 'Units to bid is a week of your sales less what is left, already on bid, or waiting in the Jita hangar. The bid is one legal tick over the top Jita bid; net each is at the hub price after fees.'));
   }
   function feedPanel(m) {
-    const mark = () => { S.seen = { at: Date.now(), orders: m.snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); paint(); };
+    const mark = () => { S.seen = { at: Date.now(), orders: m.snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); syncSoon(); paint(); };
     return h('section', { class: 'panel' },
       h('div', { class: 'block-head' }, h('h3', null, 'Since you last looked'), m.changes.length ? h('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: mark }, 'Mark as seen') : null),
       m.changes.length ? h('ul', { class: 'feed' }, m.changes.slice(0, 10).map(c => h('li', { class: 'tone-' + c.tone }, h('span', null, c.text), c.sub && h('span', { class: 'sub' }, c.sub))),
@@ -1256,7 +1257,7 @@
       h('p', { class: 'note' }, 'Hub columns are the lowest ask in each station, highest marked. Value uses the ' + p.sellName + ' ask. EVE only reports a colony as it was when last opened in game, so the units are worked out from there: an estimate.'));
   }
 
-  function saveWeeks(quiet) { if (!demo) E.store.set('eveops.weeks', S.weeks); if (!quiet) paint(); }
+  function saveWeeks(quiet) { if (!demo) E.store.set('eveops.weeks', S.weeks); syncSoon(); if (!quiet) paint(); }
   /** Finished weeks, newest first: the page's own figures, the exact ones from the wallet journal, and a box for the tracker's net to tie out against. */
   function closesView(m) {
     const c = m.closes;
@@ -1300,12 +1301,55 @@
     const at = Date.now();
     rows.forEach(r => { S.pins[r.id] = { price: r.plan.target, at }; });
     if (!demo) E.store.set('eveops.pins', S.pins);
-    paint();
+    syncSoon(); paint();
   }
   function unpin(s) {
-    s.sells.concat(s.bids).forEach(r => { delete S.pins[r.id]; });
+    const at = Date.now();
+    s.sells.concat(s.bids).forEach(r => { if (S.pins[r.id]) S.pins[r.id] = { gone: true, at }; });
     if (!demo) E.store.set('eveops.pins', S.pins);
-    paint();
+    syncSoon(); paint();
+  }
+
+  // ------------------------------------------------- sync between devices
+  const PIN_KEEP = 36 * H;
+  const syncDoc = () => ({ v: 1, pins: S.pins, copied: S.copied, seen: S.seen, weeks: S.weeks });
+  function syncApply(d) {
+    S.pins = d.pins || {}; S.copied = d.copied || {}; S.seen = d.seen || S.seen; S.weeks = Object.assign({ carried: null, w: {} }, d.weeks);
+    if (!demo) { E.store.set('eveops.pins', S.pins); E.store.set('eveops.copied', S.copied); E.store.set('eveops.seen', S.seen); E.store.set('eveops.weeks', S.weeks); }
+  }
+  let syncTimer = 0;
+  function syncNow() {
+    clearTimeout(syncTimer);
+    if (!window.Sync || !window.Sync.on) return Promise.resolve(false);
+    return window.Sync.cycle(syncDoc, syncApply, { pins: PIN_KEEP, copied: C.copied.keepHours * H }).then(ok => { paint(); return ok; });
+  }
+  /** A change made here goes up a few seconds later, so a run of presses makes one write. */
+  function syncSoon() { if (window.Sync && window.Sync.on) { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 3000); } }
+  function syncPanel() {
+    const Y = window.Sync;
+    if (!Y) return null;
+    const st = Y.state;
+    const on = () => {
+      const el = root.querySelector('[data-keep="sync-token"]');
+      S.syncNote = 'Asking GitHub.'; paint();
+      Y.enable(el ? el.value : '').then(r => { S.syncNote = r.made ? 'Sync is on. This device made the shared file.' : 'Sync is on. This device joined the shared file.'; return syncNow(); },
+        err => { S.syncNote = err.message || String(err); paint(); });
+    };
+    return h('section', { class: 'panel panel-sync' }, h('h3', null, 'Sync between devices'),
+      st.on ? [
+        h('p', { class: 'note' }, st.err ? h('span', { class: 'neg' }, st.err) : st.last ? ['On. Last checked ', live('ago', st.last), '.'] : 'On. Checking.'),
+        h('p', { class: 'note' }, 'Shared: pins, copied marks, "Mark as seen" and the weekly closes.'),
+        h('div', { class: 'tools' },
+          h('button', { type: 'button', class: 'btn btn-quiet', disabled: st.busy, onclick: () => { syncNow(); } }, 'Sync now'),
+          h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { Y.disable(); S.syncNote = 'Sync is off on this device. The shared file was left on GitHub.'; paint(); } }, 'Turn off here'))]
+        : [
+          h('p', { class: 'note' }, 'Keeps pins, copied marks, "Mark as seen" and the weekly closes the same on your PC, tablet and phone, through one small file in a secret gist on your GitHub account.'),
+          h('p', { class: 'note' }, 'Make a token at ', h('a', { href: 'https://github.com/settings/personal-access-tokens/new', target: '_blank', rel: 'noopener noreferrer' }, 'GitHub, fine-grained tokens'),
+            ': no repository access, and under Account permissions set Gists to read and write. Paste the same token on each device.'),
+          h('div', { class: 'tools' },
+            h('input', { class: 'isk-in sync-in', type: 'password', autocomplete: 'off', spellcheck: 'false', 'data-keep': 'sync-token', 'aria-label': 'GitHub token for sync', placeholder: 'GitHub token', onkeydown: e => { if (e.key === 'Enter') on(); } }),
+            h('button', { type: 'button', class: 'btn btn-quiet', onclick: on }, 'Turn on'))],
+      S.syncNote ? h('p', { class: 'note' }, S.syncNote) : null);
   }
 
   const fact = (label, value, note) => h('div', { class: 'fact' }, h('dt', null, label), h('dd', null, value, note && h('span', { class: 'sub' }, note)));
@@ -1454,7 +1498,7 @@
       topView(m),
       m ? h('main', { class: 'board' },
         h('div', { class: 'stops' }, m.stops.length ? [tripView(m), tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m), closesView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m), closesView(m)]),
-        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), dataPanel()))
+        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), syncPanel(), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     window.scrollTo(0, y);
   }
@@ -1561,6 +1605,7 @@
     const scout = () => (window.Wh && window.Wh.signedIn() ? window.Wh.tick().then(moved => { if (moved && S.view === 'wh') paint(); }, () => {}) : null);
     if (S.view === 'wh') paint();
     scout();
+    syncNow();
     await run();
     let n = 0;
     setInterval(async () => {
@@ -1571,10 +1616,10 @@
       if (!demo && !E.who()) return paint();
       n++;
       if (n % 20 === 0) checkVersion();          // every five minutes
-      if (n % 4 === 0) return run();           // once a minute: fetch whatever EVE has republished
+      if (n % 4 === 0) { syncNow(); return run(); }           // once a minute: fetch whatever EVE has republished, and what the other devices changed
       try { if (await loadLocation()) { await loadRoutes(); paint(); } } catch (err) { /* next tick */ }
     }, 15000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { wake(); run(); } });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { wake(); syncNow(); run(); } });
   }
   boot();
 })();

@@ -248,6 +248,8 @@ button { font: inherit; color: inherit; }
 .isk-in { width: 8.2rem; background: var(--void); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; padding: 0.15rem 0.4rem; font: inherit; text-align: right; }
 .isk-in::placeholder { color: color-mix(in srgb, var(--dim) 60%, transparent); }
 .closes-carry { margin-top: 0.6rem; font-size: 0.92rem; }
+.sync-in { width: 11rem; text-align: left; }
+.panel-sync .tools { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 .closes-carry .sub { display: inline; margin-left: 0.6rem; }
 .closes-table tr.is-open td { color: var(--dim); }
 .closes-table .neg { color: var(--bad); font-weight: 600; }

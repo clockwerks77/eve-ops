@@ -428,3 +428,39 @@ test('tie-out: tied within the tolerance, and counted in a row from the newest w
   assert.equal(L.tieOut([{ net: 100, tracker: 100 }, { net: 100, tracker: null }], 0.02).run, 0);
   assert.equal(L.tieOut([], 0.02).run, 0);
 });
+
+test('sync: two devices joined either way round end the same, and joining again changes nothing', () => {
+  const now = 1e12, H = 36e5, keep = { pins: 36 * H, copied: 6 * H };
+  const pc = {
+    v: 1,
+    pins: { 11: { price: 100, at: now - H }, 12: { price: 200, at: now - 40 * H } },
+    copied: { 21: { price: 5, at: now - 60000 }, 22: { price: 6, at: now - 120000 }, r380: { price: 9, at: now - 7 * H } },
+    seen: { at: now - 3 * H, orders: { 1: { s: 'leading' } } },
+    weeks: { carried: { v: 1e9, at: now - 100 }, w: { '2026-11-02': { gross: 10, units: 1, net: 5, uncovered: 0, frozenAt: now - 50, tracker: { v: 5, at: now - 10 } }, '2026-11-09': { escrow: 7, wallet: 8, seenAt: now - 500 } } },
+  };
+  const phone = {
+    v: 1,
+    pins: { 11: { gone: true, at: now - 60000 }, 13: { price: 300, at: now - 2 * H } },
+    copied: { 22: { gone: true, at: now - 30000 }, 23: { price: 7, at: now - 1000 } },
+    seen: { at: now - 60000, orders: {}, auto: true },
+    weeks: { carried: null, w: { '2026-11-02': { gross: 11, units: 1, net: 6, uncovered: 0, frozenAt: now - 20, fees: -1, change: 2, close: 3 }, '2026-11-09': { escrow: 9, wallet: 10, seenAt: now - 100 } } },
+  };
+  const ab = L.syncMerge(pc, phone, now, keep), ba = L.syncMerge(phone, pc, now, keep);
+  assert.equal(L.stable(ab), L.stable(ba));
+  assert.equal(L.stable(L.syncMerge(ab, pc, now, keep)), L.stable(ab));
+  assert.equal(L.stable(L.syncMerge(ab, ab, now, keep)), L.stable(ab));
+  // a pin cleared on the phone is cleared everywhere; a stale pin is dropped; a new one travels
+  assert.deepEqual(ab.pins, { 11: { gone: true, at: now - 60000 }, 13: { price: 300, at: now - 2 * H } });
+  // copied marks: the undo on the phone wins over the older mark, the fresh ones are kept, the 7-hour-old one is dropped
+  assert.deepEqual(Object.keys(ab.copied).sort(), ['21', '22', '23']);
+  assert.equal(ab.copied[22].gone, true);
+  // "Mark as seen" by hand beats a newer first-visit default
+  assert.equal(ab.seen.at, now - 3 * H);
+  // the week keeps the figures fixed first, gains the journal figures, and keeps the tracker entry
+  assert.deepEqual(ab.weeks.w['2026-11-02'], { gross: 10, units: 1, net: 5, uncovered: 0, frozenAt: now - 50, fees: -1, change: 2, close: 3, tracker: { v: 5, at: now - 10 } });
+  assert.deepEqual(ab.weeks.w['2026-11-09'], { escrow: 9, wallet: 10, seenAt: now - 100 });
+  assert.deepEqual(ab.weeks.carried, { v: 1e9, at: now - 100 });
+  // an empty sync file takes everything from the device
+  assert.equal(L.stable(L.syncMerge(ab, { v: 1 }, now, keep)), L.stable(ab));
+  assert.equal(L.stable({ b: 1, a: [2, { d: 1, c: undefined }] }), '{"a":[2,{"d":1}],"b":1}');
+});
