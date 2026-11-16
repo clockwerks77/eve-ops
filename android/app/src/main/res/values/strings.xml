@@ -15,4 +15,9 @@
     <string name="signed_in">Signed in. Loading.</string>
     <string name="alerts_channel">Things to act on</string>
     <string name="alerts_channel_about">An order that lost the lead, extractors that stopped, a launchpad that is nearly full. Chosen in the dashboard\'s Phone notifications panel.</string>
+    <string name="timers_channel">Camp timers</string>
+    <string name="timers_channel_about">Picket changes, sleepers due in a gas site, a hole near the end of its life. Set on the dashboard\'s Expedition tab. Played as an alarm, so they are heard with the phone on silent.</string>
+    <string name="timer_confirm">Confirm</string>
+    <string name="timer_done">Got it</string>
+    <string name="timer_snooze">Snooze 10 min</string>
 </resources>

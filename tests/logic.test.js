@@ -583,3 +583,78 @@ test('expedition: kit readiness and the shopping list (acceptance test 2)', () =
   assert.equal(L.kitReady('a', full, keys).pct, 100);
   assert.equal(Math.round(L.trainDays(387760, 1800)), 9); assert.equal(L.stockNeed({ base: 3, per: 'camp', doubled: true }, 4), 6);
 });
+
+test('expedition: the picket rotation rolls in order, and a snooze takes one back', () => {
+  const MIN = 60000, t0 = Date.UTC(2026, 10, 20, 1, 0);
+  const timer = { id: 'tp', kind: 'picket', rotation_order: ['a', 'b', 'c'], turn: 0, started_at: t0, since: t0, ends_at: t0 + 45 * MIN, interval_min: 45, acked: null };
+  assert.deepEqual(L.picketRoll(timer, t0 + 44 * MIN).stints, []);
+  // 2 h 20 min in: three changes have been made, a then b then c, and a is on again
+  const r = L.picketRoll(timer, t0 + 140 * MIN);
+  assert.deepEqual(r.stints.map(x => [x.pilot_id, (x.from - t0) / MIN, (x.to - t0) / MIN]), [['a', 0, 45], ['b', 45, 90], ['c', 90, 135]]);
+  assert.equal(r.timer.turn, 0); assert.equal(r.timer.since, t0 + 135 * MIN); assert.equal(r.timer.ends_at, t0 + 180 * MIN);
+  assert.equal(timer.turn, 0);                                                         // the original is left alone
+  // snooze before the change is due: the same pilot stays ten minutes longer
+  const early = L.picketSnooze(timer, [], t0 + 45 * MIN, t0 + 55 * MIN);
+  assert.ok(early.ok); assert.equal(early.timer.ends_at, t0 + 55 * MIN); assert.equal(early.timer.turn, 0);
+  // snooze pressed 2 minutes after the change at 45: b's turn is taken back, a stays on until 57
+  const one = L.picketRoll(timer, t0 + 47 * MIN);
+  const back = L.picketSnooze(one.timer, one.stints, t0 + 45 * MIN, t0 + 57 * MIN);
+  assert.ok(back.ok); assert.deepEqual(back.stints, []); assert.equal(back.timer.turn, 0); assert.equal(back.timer.since, t0); assert.equal(back.timer.ends_at, t0 + 57 * MIN);
+  const after = L.picketRoll(back.timer, t0 + 58 * MIN);
+  assert.deepEqual(after.stints.map(x => [x.pilot_id, (x.to - x.from) / MIN]), [['a', 57]]); assert.equal(after.timer.ends_at, t0 + 102 * MIN);
+  // a snooze for a change long past is refused
+  assert.equal(L.picketSnooze(r.timer, r.stints, t0 + 45 * MIN, t0 + 150 * MIN).ok, false);
+  assert.equal(L.clock(245000), '4:05'); assert.equal(L.clock(3729000), '1:02:09'); assert.equal(L.clock(-500), '0:00');
+});
+
+test('expedition: what the phone is told to ring for', () => {
+  const MIN = 60000, t0 = Date.UTC(2026, 10, 20, 1, 0), rules = { picket_min: 45, snooze_min: 10, late_min: 5, gas_min: 15, eol_hours: 4, eol_warn_min: [60, 15], ahead: 12, horizon_hours: 10 }, name = id => ({ a: 'Rook', b: 'Finch', c: 'Wren' })[id];
+  const picket = { id: 'tp', kind: 'picket', rotation_order: ['a', 'b', 'c'], turn: 0, started_at: t0, since: t0, ends_at: t0 + 45 * MIN, interval_min: 45, acked: null };
+  const gas = { id: 'tg', kind: 'gas', label: 'Barren Perimeter Reservoir', started_at: t0, ends_at: t0 + 15 * MIN };
+  const eol = { id: 'te', kind: 'eol', label: 'the C3 static', ends_at: t0 + 240 * MIN };
+  const list = L.campAlerts({ timers: [picket, gas, eol, { id: 'tw', kind: 'window', label: 'Mining', ends_at: null }], name, rules }, t0 + MIN);
+  assert.deepEqual(list.slice(0, 3).map(a => [a.id, (a.at - t0) / MIN, a.title]),
+    [['tg', 15, 'Sleepers imminent: Barren Perimeter Reservoir'], ['tp:' + (t0 + 45 * MIN), 45, 'Picket: Finch takes over'], ['tp:' + (t0 + 90 * MIN), 90, 'Picket: Wren takes over']]);
+  const first = list[1];
+  assert.equal(first.text, 'Rook comes off picket, Finch goes on.'); assert.equal(first.group, 'tp'); assert.deepEqual(first.actions, ['done', 'snooze']);
+  assert.equal(first.late.at, t0 + 50 * MIN); assert.equal(first.late.text, 'Finch should have relieved Rook 5 minutes ago.');
+  // the hole rings at 60 and at 15 minutes left
+  assert.deepEqual(list.filter(a => a.group === 'te').map(a => [(a.at - t0) / MIN, a.title]), [[180, 'Hole to the C3 static: 60 minutes left at most'], [225, 'Hole to the C3 static: 15 minutes left at most']]);
+  // the rotation goes round: a, b, c, a ... and stops at the horizon
+  const turns = list.filter(a => a.group === 'tp');
+  assert.equal(turns[2].title, 'Picket: Rook takes over'); assert.ok(turns.length >= 8 && turns.length <= rules.ahead);
+  assert.ok(turns.every(a => a.at - (t0 + MIN) <= rules.horizon_hours * 3600000));
+  // just after a change nobody confirmed: that change is still listed for its second ring, until it is confirmed or the ring has gone
+  const rolled = L.picketRoll(picket, t0 + 46 * MIN).timer;
+  const now = L.campAlerts({ timers: [rolled], name, rules }, t0 + 46 * MIN);
+  assert.equal(now[0].id, 'tp:' + (t0 + 45 * MIN)); assert.equal(now[0].late.at, t0 + 50 * MIN); assert.equal(now[1].at, t0 + 90 * MIN);
+  assert.equal(L.campAlerts({ timers: [Object.assign({}, rolled, { acked: rolled.since })], name, rules }, t0 + 46 * MIN)[0].at, t0 + 90 * MIN);
+  assert.equal(L.campAlerts({ timers: [rolled], name, rules }, t0 + 51 * MIN)[0].at, t0 + 90 * MIN);
+  // one pilot is no rotation; a gas timer that has rung or been confirmed is not rung again
+  assert.deepEqual(L.campAlerts({ timers: [Object.assign({}, picket, { rotation_order: ['a'] })], name, rules }, t0), []);
+  assert.deepEqual(L.campAlerts({ timers: [gas], name, rules }, t0 + 16 * MIN), []);
+  assert.deepEqual(L.campAlerts({ timers: [Object.assign({}, gas, { acked: true })], name, rules }, t0), []);
+});
+
+test('expedition: a camp night as Markdown (acceptance test 7)', () => {
+  const MIN = 60000, t0 = Date.UTC(2026, 10, 20, 1, 0), hm = ts => new Date(ts).toISOString().slice(11, 16);
+  const md = L.nightMarkdown({
+    camp: { system_name: 'J123405', system_class: 'C2', statics: 'highsec, C3', stage_type: 'nomad' }, night: { n: 2, started_at: t0, ended_at: t0 + 200 * MIN },
+    windows: [
+      { type: 'ratting', start: t0 + 100 * MIN, end: t0 + 190 * MIN, pilot_ids: ['adam', 'a'], adam_mode: 'khiana', note: 'rolled the C3 twice | stood down early', pickets: [] },
+      { type: 'mining', start: t0 + 5 * MIN, end: t0 + 95 * MIN, pilot_ids: ['adam', 'a', 'b'], adam_mode: 'todashi', note: '', pickets: [{ pilot_id: 'a', from: t0 + 5 * MIN, to: t0 + 50 * MIN }, { pilot_id: 'b', from: t0 + 50 * MIN, to: t0 + 95 * MIN }] }],
+    holes: [{ destination: 'C3 static', state: 'critical', eol_at: t0 + 150 * MIN, picketed: true, bookmarked: false }],
+    name: id => ({ adam: 'Adam', a: 'Rook', b: 'Finch' })[id], mode: k => ({ khiana: 'Khiana Kyn', todashi: 'Todashi Kitsune' })[k], type: k => k.charAt(0).toUpperCase() + k.slice(1), time: hm, day: () => 'Fri 20 Nov' });
+  const lines = md.split('\n');
+  assert.equal(lines[0], '# Camp — Night 2');
+  assert.ok(md.includes('J123405 (C2, statics: highsec, C3). Nomad camp.')); assert.ok(md.includes('Night 2: Fri 20 Nov 01:00 to 04:20.'));
+  // windows in time order, as a table with the same number of cells in every row
+  const rows = lines.filter(l => l.startsWith('|'));
+  assert.equal(rows.length, 4); assert.ok(rows.every(r => r.split('|').length === 9));
+  assert.equal(rows[2], '| Mining | 01:05 | 02:35 | 1 h 30 min | Todashi Kitsune | Adam, Rook, Finch | Rook 01:05 to 01:50; Finch 01:50 to 02:35 |');
+  assert.equal(rows[3], '| Ratting | 02:40 | 04:10 | 1 h 30 min | Khiana Kyn | Adam, Rook | none |');
+  assert.ok(md.includes('2 windows, 3 h in all.'));
+  assert.ok(md.includes('- Ratting, 02:40: rolled the C3 twice | stood down early'));
+  assert.ok(md.includes('## Bank')); assert.ok(md.includes('- C3 static: critical, end of life seen 03:30, picketed, not bookmarked both sides'));
+  assert.ok(L.nightMarkdown({ camp: {}, night: { n: 1, started_at: t0, ended_at: null }, windows: [], holes: [], name: String, mode: String, type: String, time: hm, day: () => 'Fri' }).includes('No windows were run.'));
+});

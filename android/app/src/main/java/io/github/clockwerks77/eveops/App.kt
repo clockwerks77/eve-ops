@@ -6,6 +6,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Refresh.schedule(this)
+        Timers.rearm(this)                        // alarms are lost when the app is force-stopped; this sets them again
     }
 
     companion object {

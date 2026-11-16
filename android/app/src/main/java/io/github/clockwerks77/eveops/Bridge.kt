@@ -99,8 +99,21 @@ class Bridge(context: Context, private val host: Host) {
                 val allowed = Alerts.allowed(ctx)
                 if (m.optBoolean("ask") && !allowed) host.askNotifications()
                 // "settings": this build can open Android's notification settings for the app (the op below)
-                answer(reply, rpc, JSONObject().put("allowed", allowed).put("settings", true))
+                // "timers": this build rings the camp's timers (the two ops below); "exact": Android lets it ring on the minute
+                answer(reply, rpc, JSONObject().put("allowed", allowed).put("settings", true).put("timers", true).put("exact", Timers.exact(ctx)))
             }
+
+            // The Expedition tab's whole list of what to ring for, and the timers that still exist.
+            "timers" -> {
+                val live = HashSet<String>()
+                val names = m.optJSONArray("live")
+                if (names != null) for (i in 0 until names.length()) live.add(names.optString(i))
+                Timers.set(ctx, Timers.parse(m.optJSONArray("alerts")), live)
+                answer(reply, rpc, JSONObject().put("ok", true).put("allowed", Alerts.allowed(ctx)).put("exact", Timers.exact(ctx)))
+            }
+
+            // What was pressed on the timers' notifications since the page last asked.
+            "timer-acts" -> answer(reply, rpc, JSONObject().put("acts", Timers.acts(ctx)))
 
             "notify-settings" -> host.openNotificationSettings()
 

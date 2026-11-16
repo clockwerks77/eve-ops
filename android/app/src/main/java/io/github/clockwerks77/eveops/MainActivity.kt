@@ -127,7 +127,7 @@ class MainActivity : Activity(), Bridge.Host {
         super.onDestroy()
     }
 
-    /** eveops://auth?code=...&state=... finishes a sign-in; eveops://open?view=... is a tap on a widget. */
+    /** eveops://auth?code=...&state=... finishes a sign-in; eveops://open?view=... is a tap on a widget or on a notification. */
     private fun route(intent: Intent?): Boolean {
         val uri = intent?.data ?: return false
         if (uri.scheme != "eveops") return false
@@ -143,6 +143,7 @@ class MainActivity : Activity(), Bridge.Host {
     private fun show(view: String, fresh: Boolean) {
         val hash = when (view) {
             "wormholes" -> "#wormholes"
+            "expedition" -> "#expedition"
             "demo" -> "#demo"
             else -> "#trading"
         }

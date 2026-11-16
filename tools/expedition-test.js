@@ -125,6 +125,8 @@ const FIT = '[Procurer, Camp standard]\nDamage Control II\nMining Laser Upgrade 
   await page.goto('http://localhost:8147/#demo', { waitUntil: 'networkidle' }); await page.reload({ waitUntil: 'networkidle' });
   ok('the top bar has the three views', (await page.locator('.top .view').allInnerTexts()).join(',') === 'Trading,Wormholes,Expedition');
   await page.locator('.top .view', { hasText: 'Expedition' }).click();
+  ok('the sample camp is running, so the tab opens on the Camp board', await page.locator('.ex-head .view.is-on').innerText() === 'Camp' && await page.locator('#camp-picket').count() === 1);
+  await tab('Muster');
   ok('the sample crew is separate from the real one', await page.locator('.pcard', { hasText: 'Rook' }).count() === 1 && await page.locator('.pcard', { hasText: 'Wren' }).count() === 0);
   await page.locator('.top .view', { hasText: 'Trading' }).click();
   ok('Trading is still there', await page.locator('.stop').count() > 0);

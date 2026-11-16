@@ -15,6 +15,7 @@ import androidx.test.uiautomator.Until
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -205,5 +206,69 @@ class AppOnDeviceTest {
         instrumentation.runOnMainSync { Alerts.handle(ctx, summary("c1", "c2", "c3", "c4"), false) }
         assertTrue("a new order is told; showing ${titles(nm)}", waitFor(15) { titles(nm) == setOf("1 order to change") })
         nm.cancelAll()
+    }
+
+    private fun ring(id: String, group: String, at: Long, title: String, late: Long?, actions: String) =
+        """{"id":"$id","group":"$group","at":$at,"title":"$title","text":"Rook comes off picket, Finch goes on.",""" +
+            (if (late != null) """"late":{"at":$late,"title":"Picket change not confirmed","text":"Finch should have relieved Rook."},""" else "") +
+            """"actions":$actions}"""
+
+    /** The camp's timers: set by the page, rung by Android with the app off the screen. */
+    @Test
+    fun f_campTimersRingWithTheAppShut() {
+        if (!Alerts.allowed(ctx)) instrumentation.uiAutomation.grantRuntimePermission(ctx.packageName, "android.permission.POST_NOTIFICATIONS")
+        assertTrue("Android allows notifications from the app", waitFor(10) { Alerts.allowed(ctx) })
+        assertTrue("Android lets the app ring on the minute", Timers.exact(ctx))
+        device.pressHome()
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.cancelAll()
+        Timers.acts(ctx)
+        Thread.sleep(2000)
+
+        // a picket change in 4 seconds with a second ring 10 seconds after it, and the change after that an hour on
+        val t0 = System.currentTimeMillis()
+        val both = """["done","snooze"]"""
+        Timers.set(
+            ctx,
+            Timers.parse(JSONArray("[" + ring("tp:1", "tp", t0 + 4_000, "Picket: Finch takes over", t0 + 14_000, both) + "," + ring("tp:2", "tp", t0 + 3_600_000, "Picket: Wick takes over", null, both) + "]")),
+            setOf("tp"),
+        )
+        assertTrue("the picket change rings; showing ${titles(nm)}", waitFor(20) { "Picket: Finch takes over" in titles(nm) })
+        assertTrue("within a few seconds of its time", System.currentTimeMillis() - (t0 + 4_000) < 10_000)
+        device.openNotification()
+        seen("Snooze 10 min", 8)                    // its buttons show when Android draws it opened out; the picture is the record
+        shot("timer")
+        device.pressHome()
+        assertTrue("nobody confirms it, so it rings a second time; showing ${titles(nm)}", waitFor(30) { "Picket change not confirmed" in titles(nm) })
+
+        // Snooze on the notification: it rings again ten minutes from the press, and the later change moves with it
+        ctx.sendBroadcast(Timers.press(ctx, Timers.SNOOZE, "tp:1"))
+        assertTrue("the notification goes; showing ${titles(nm)}", waitFor(10) { titles(nm).isEmpty() })
+        val moved = Timers.stored(ctx)
+        val by = moved[0].at - (t0 + 4_000)
+        assertTrue("the change is put off by ten minutes from the press", moved[0].at - System.currentTimeMillis() in 580_000L..600_000L)
+        assertEquals("and the change after it by the same", t0 + 3_600_000 + by, moved[1].at)
+        val acts = Timers.acts(ctx)
+        assertEquals("the press is kept for the page", 1, acts.length())
+        assertEquals("snooze", acts.getJSONObject(0).getString("act"))
+        assertEquals("tp:1", acts.getJSONObject(0).getString("id"))
+        assertEquals("and handed over once", 0, Timers.acts(ctx).length())
+
+        // a gas timer: one ring; Got it puts it away
+        val t1 = System.currentTimeMillis()
+        val gas = "Sleepers imminent: Barren Perimeter Reservoir"
+        Timers.set(ctx, Timers.parse(JSONArray("[" + ring("tg", "tg", t1 + 3_000, gas, null, """["done"]""") + "]")), setOf("tg"))
+        assertTrue("the sleeper warning rings; showing ${titles(nm)}", waitFor(20) { gas in titles(nm) })
+        ctx.sendBroadcast(Timers.press(ctx, Timers.DONE, "tg"))
+        assertTrue("Got it puts it away", waitFor(10) { titles(nm).isEmpty() })
+        assertEquals("done", Timers.acts(ctx).getJSONObject(0).getString("act"))
+
+        // the pilot leaves a site whose warning is still showing: the page's next list has no such timer
+        val t2 = System.currentTimeMillis()
+        Timers.set(ctx, Timers.parse(JSONArray("[" + ring("tg2", "tg2", t2 + 3_000, gas, null, """["done"]""") + "]")), setOf("tg2"))
+        assertTrue("a second site rings; showing ${titles(nm)}", waitFor(20) { gas in titles(nm) })
+        Timers.set(ctx, emptyList(), emptySet())
+        assertTrue("a timer that is gone takes its notification with it", waitFor(10) { titles(nm).isEmpty() })
+        assertTrue("and nothing is left to ring", Timers.stored(ctx).isEmpty())
     }
 }

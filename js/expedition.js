@@ -1,15 +1,18 @@
-/* Eve Ops — Expedition ops, Phase A: Muster (who is coming and what they can fly) and Kit & Shopping
+/* Eve Ops — Expedition ops. Phase A: Muster (who is coming and what they can fly) and Kit & Shopping
    (the standard four-hull kit, the fits, camp stock, the shopping list, the Night 0 checklist).
+   Phase B: the Camp board (status, where we left off, hole board, timers and the picket rotation),
+   windows and the session log. The Android app rings the timers; this page tells it what to ring for.
    One operator, no network needed: everything is kept on this device and can be exported.
    Adam flies two characters on one account, so he is one seat with two modes, never two pilots.
    The entities follow the module's spec (Pilot, CanFly, KitItem, Checklist; Camp, Window, Timer, Bank,
-   LootEvent and WindowRecord are kept empty here for the phases that fill them). */
+   LootEvent is kept empty here for the phase that fills it). */
 (function () {
   'use strict';
   const C = window.EVEOPS_CONFIG, L = window.Logic, E = window.Esi, X = C.expedition;
   const demo = !!(window.Demo && window.Demo.on);
   const KEY = demo ? 'eveops.expedition.demo' : 'eveops.expedition';
-  const U = { tab: 'muster', open: null, fit: null, draft: '', io: null, ioText: '', note: '', drop: null };
+  const U = { tab: null, open: null, fit: null, draft: '', io: null, ioText: '', note: '', drop: null, gas: '', hole: '',
+    camp: { system_name: '', system_class: 'C2', statics: '', stage_type: 'nomad' }, win: { type: X.windows[0].key, present: null, order: null, interval: X.timers.picket_min } };
   let repaint = () => {};
   const uid = p => p + Math.random().toString(36).slice(2, 9);
   const num = n => Number(n).toLocaleString('en-US');
@@ -57,7 +60,26 @@
     ['gas', 'barge', 'ratter', 'scan'].forEach(k => d.can_fly.push({ pilot_id: p[1].id, hull_key: k, can_fly: true }));
     d.can_fly.push({ pilot_id: p[2].id, hull_key: 'ratter', can_fly: true });
     d.kit.push({ pilot_id: p[1].id, hull_key: 'prospect', status: 'owned' }, { pilot_id: p[1].id, hull_key: 'procurer', status: 'owned' }, { pilot_id: 'adam', hull_key: 'praxis', status: 'staged' });
-    d.seats.m1 = p[1].id;
+    Object.assign(p[3], { display_name: 'Wick', character_name: 'Wick Dorne', sp_approx: 6.5e6, omega: true, fly_asked: true });
+    d.seats = { m1: p[1].id, m2: p[2].id, m3: p[3].id };
+    // a camp in its second night, with a mining window running
+    const now = Date.now(), HR = 3600000, me = p[0].id, a = p[1].id, b = p[2].id, c3 = p[3].id;
+    d.checklists[0].camp_id = 'c-sample';
+    d.checklists[0].items.forEach(i => { i.checked = true; i.checked_at = now - 31 * HR; });
+    d.camps.push({ id: 'c-sample', system_name: 'J211405', system_class: 'C2', statics: 'highsec, C3', stage_type: 'nomad', start_date: now - 32 * HR, status: 'active',
+      nights: [{ n: 1, started_at: now - 26 * HR, ended_at: now - 22.5 * HR }, { n: 2, started_at: now - 1.2 * HR, ended_at: null }],
+      holes: [{ id: 'h-1', destination: 'highsec static', state: 'fresh', eol_at: null, picketed: false, bookmarked: true }, { id: 'h-2', destination: 'C3 static', state: 'unstable', eol_at: now - 2.6 * HR, picketed: true, bookmarked: true }] });
+    d.windows.push(
+      { id: 'w-1', camp_id: 'c-sample', night: 1, type: 'mining', start: now - 25.8 * HR, end: now - 24.3 * HR, pilot_ids: [me, a, b, c3], adam_mode: 'todashi', note: '', pickets: [{ pilot_id: a, from: now - 25.8 * HR, to: now - 25.05 * HR }, { pilot_id: b, from: now - 25.05 * HR, to: now - 24.3 * HR }] },
+      { id: 'w-2', camp_id: 'c-sample', night: 1, type: 'ratting', start: now - 24.1 * HR, end: now - 22.7 * HR, pilot_ids: [me, a, b], adam_mode: 'khiana', note: 'Rolled the C3 twice. Hunter on the chain, stood down early.', pickets: [] },
+      { id: 'w-3', camp_id: 'c-sample', night: 2, type: 'mining', start: now - 20 * 60000, end: null, pilot_ids: [me, a, b, c3], adam_mode: 'todashi', note: '', pickets: [] });
+    d.window_records.push({ window_id: 'w-1', camp_id: 'c-sample', type: 'mining', start: now - 25.8 * HR, end: now - 24.3 * HR, pilot_ids_present: [me, a, b, c3], adam_mode: 'todashi' },
+      { window_id: 'w-2', camp_id: 'c-sample', type: 'ratting', start: now - 24.1 * HR, end: now - 22.7 * HR, pilot_ids_present: [me, a, b], adam_mode: 'khiana' });
+    d.timers.push({ id: 't-win', camp_id: 'c-sample', kind: 'window', label: 'Mining window', ends_at: null, rotation_order: [], started_at: now - 20 * 60000, window_id: 'w-3' },
+      { id: 't-picket', camp_id: 'c-sample', kind: 'picket', label: 'Picket rotation', ends_at: now + 25 * 60000, rotation_order: [a, b, c3], started_at: now - 20 * 60000, since: now - 20 * 60000, turn: 0, interval_min: 45, acked: null, window_id: 'w-3' },
+      { id: 't-eol', camp_id: 'c-sample', kind: 'eol', label: 'C3 static', ends_at: now + 1.4 * HR, rotation_order: [], hole_id: 'h-2' });
+    d.adam_mode = 'todashi';
+    d.sample_at = now;
     return d;
   }
   /** Whatever was stored (or imported), with anything missing filled in, so older exports keep working. */
@@ -71,10 +93,14 @@
     out.seats = Object.assign({ m1: null, m2: null, m3: null }, d.seats);
     if (!X.modes.some(m => m.key === out.adam_mode)) out.adam_mode = X.modes[0].key;
     if (!(out.checklists || []).some(c => c.kind === 'night0')) out.checklists = (out.checklists || []).concat(fresh().checklists);
+    for (const k of ['camps', 'windows', 'timers', 'banks', 'loot_events', 'window_records']) if (!Array.isArray(out[k])) out[k] = [];
+    out.camps.forEach(c => { c.nights = c.nights || []; c.holes = c.holes || []; });
+    out.windows.forEach(w => { w.pickets = w.pickets || []; w.pilot_ids = w.pilot_ids || []; });
     return out;
   }
   let D = normal(E.store.get(KEY)) || (demo ? sample() : fresh());
-  const save = () => { E.store.set(KEY, D); repaint(); };
+  if (demo && (!D.sample_at || Date.now() - D.sample_at > 6 * 3600000)) D = sample();          // the sample camp is always "tonight"
+  const save = () => { E.store.set(KEY, D); push(); repaint(); };
 
   const adam = () => D.pilots.find(p => p.is_adam);
   const mode = () => X.modes.find(m => m.key === D.adam_mode);
@@ -143,10 +169,10 @@
         h('div', { class: 'seat seat-adam' },
           h('span', { class: 'seat-role' }, m.role),
           h('span', { class: 'seat-who' }, label(me) + ', flying ', h('b', null, m.name), ' in the ' + m.hull),
-          seg('Adam’s mode', X.modes.map(x => [x.key, x.name.split(' ')[0] + '-mode']), D.adam_mode, k => { D.adam_mode = k; save(); }),
+          seg('Adam’s mode', X.modes.map(x => [x.key, x.name.split(' ')[0] + '-mode']), D.adam_mode, setMode),
           h('span', { class: 'sub' }, off.map(x => x.name + ' and the ' + x.hull).join(', ') + ' stay logged off: one account, one character at a time.')),
         seat('m1', 1), seat('m2', 2), seat('m3', 3)),
-      h('p', { class: 'note' }, 'The picket is one of the miner and ratter seats in turn, and earns the same share. The rotation order is set per window on the camp board, which is the next phase.'));
+      h('p', { class: 'note' }, 'The picket is one of the miner and ratter seats in turn, and earns the same share. The rotation order is set when a window starts, on the Camp board.'));
   }
 
   function editor(p) {
@@ -276,7 +302,7 @@
 
   function kitView() {
     const kitAll = D.pilots.reduce((n, p) => n + ready(p).have, 0), kitMax = D.pilots.length * KIT.length;
-    const list = D.checklists.find(c => c.kind === 'night0'), done = list.items.filter(i => i.checked).length;
+    const list = night0(), done = list.items.filter(i => i.checked).length;
     return [
       h('section', { class: 'block ex-block' },
         h('div', { class: 'block-head' }, h('h3', null, 'The standard kit'), h('span', null, (kitMax ? Math.round(kitAll / kitMax * 100) : 0) + '% of the crew’s hulls in hand'), h('span', { class: 'why' }, 'every pilot, all four hulls')),
@@ -292,9 +318,354 @@
       shoppingView(),
       h('section', { class: 'block ex-block', id: 'ex-night0' },
         h('div', { class: 'block-head' }, h('h3', null, 'Night 0 checklist'), h('span', { class: 'chip ' + (done === list.items.length ? 'chip-lead' : 'chip-hold') }, done + ' of ' + list.items.length)),
-        h('div', { class: 'checks' }, list.items.map(it => h('label', { class: 'check' },
-          h('input', { type: 'checkbox', checked: it.checked, onchange: e => { it.checked = e.target.checked; it.checked_at = it.checked ? Date.now() : null; save(); } }),
-          h('span', null, it.label, it.checked_at ? h('span', { class: 'sub' }, 'done ' + new Date(it.checked_at).toLocaleString('en-CA', { weekday: 'short', hour: 'numeric', minute: '2-digit' })) : null)))))];
+        checks(list))];
+  }
+  const checks = list => h('div', { class: 'checks' }, list.items.map(it => h('label', { class: 'check' },
+    h('input', { type: 'checkbox', checked: it.checked, onchange: e => { it.checked = e.target.checked; it.checked_at = it.checked ? Date.now() : null; save(); } }),
+    h('span', null, it.label, it.checked_at ? h('span', { class: 'sub' }, 'done ' + new Date(it.checked_at).toLocaleString('en-CA', { weekday: 'short', hour: 'numeric', minute: '2-digit' })) : null))));
+
+
+  // ------------------------------------------------------------------ camp
+  const T = X.timers, MIN = 60000;
+  const camp = () => D.camps.find(c => c.status !== 'ended') || null;
+  const nightOf = c => c.nights.find(n => !n.ended_at) || null;
+  const openWin = c => D.windows.find(w => w.camp_id === c.id && !w.end) || null;
+  const night0 = () => D.checklists.filter(c => c.kind === 'night0').pop();
+  const pname = id => { const p = D.pilots.find(q => q.id === id); return p ? label(p) : 'a pilot since removed'; };
+  const modeName = k => (X.modes.find(m => m.key === k) || {}).name || k;
+  const typeName = k => (X.windows.find(w => w.key === k) || {}).label || k;
+  const hm = ts => new Date(ts).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const dayName = ts => new Date(ts).toLocaleDateString('en-CA', { weekday: 'short', day: 'numeric', month: 'short' });
+  const others = w => w.pilot_ids.filter(id => id !== adam().id).map(pname).join(', ') || 'nobody else';
+  /** A running clock: counts down to `until`, or up from `since`. The tick below keeps the text moving. */
+  const face = (kind, ts, cls) => h('b', { class: 'clockface' + (cls ? ' ' + cls : ''), ['data-' + kind]: ts }, L.clock(kind === 'until' ? ts - Date.now() : Date.now() - ts));
+  function setMode(k) {
+    D.adam_mode = k;
+    const c = camp(), w = c && openWin(c);
+    if (w) w.adam_mode = k;                       // one account: the window is flown by whichever character is logged in
+    save();
+  }
+
+  /** Brings a picket rotation up to `now`; turns that have ended go into the window's log. */
+  function rollTimer(t, now) {
+    const r = L.picketRoll(t, now);
+    if (!r.stints.length) return false;
+    Object.assign(t, r.timer);
+    const w = D.windows.find(x => x.id === t.window_id);
+    if (w) w.pickets = w.pickets.concat(r.stints);
+    return true;
+  }
+  function roll() {
+    let moved = false;
+    for (const t of D.timers) if (t.kind === 'picket' && rollTimer(t, Date.now())) moved = true;
+    return moved;
+  }
+
+  // The Android app rings the alarms. It is handed the list of what to ring for, and reports back what was pressed
+  // on its notifications (Done, Snooze) while this page was not looking.
+  const app = { known: !E.native, timers: false, allowed: true, exact: true };
+  let pushed = null, pushT = 0;
+  const alerts = () => { const c = camp(); return c ? L.campAlerts({ timers: D.timers.filter(t => t.camp_id === c.id), name: pname, rules: T }, Date.now()) : []; };
+  function push() {
+    if (!app.timers || demo) return;
+    clearTimeout(pushT);
+    pushT = setTimeout(() => {
+      const list = alerts(), text = JSON.stringify([list, D.timers.map(t => t.id)]);
+      if (text === pushed) return;
+      E.ask('timers', { alerts: list, live: D.timers.map(t => t.id) }).then(r => {
+        pushed = text;
+        const was = app.allowed + '|' + app.exact;
+        app.allowed = r.allowed !== false; app.exact = r.exact !== false;
+        if (was !== app.allowed + '|' + app.exact) repaint();
+      }, () => {});
+    }, 200);
+  }
+  function applyAct(a) {
+    const cut = String(a.id).indexOf(':'), id = cut < 0 ? String(a.id) : String(a.id).slice(0, cut), t = D.timers.find(x => x.id === id);
+    if (!t) return;
+    if (t.kind === 'gas') { t.acked = true; return; }
+    if (t.kind !== 'picket') return;
+    const boundary = Number(String(a.id).slice(cut + 1)), w = D.windows.find(x => x.id === t.window_id);
+    rollTimer(t, a.at);
+    if (a.act === 'done' && t.since === boundary) t.acked = boundary;
+    if (a.act === 'snooze' && w) { const r = L.picketSnooze(t, w.pickets, boundary, a.until); if (r.ok) { Object.assign(t, r.timer); w.pickets = r.stints; } }
+  }
+  function pull() {
+    if (!app.timers || demo) return Promise.resolve();
+    return E.ask('timer-acts', {}).then(r => {
+      const acts = (r.acts || []).slice().sort((x, y) => x.at - y.at);
+      if (!acts.length) return;
+      acts.forEach(applyAct); roll(); pushed = null; save();
+    }, () => {});
+  }
+  /** What this build of the app can do, and whether Android lets it notify. */
+  function look() {
+    if (!E.native) return;
+    E.ask('notify', {}).then(r => {
+      app.known = true; app.timers = !!r.timers; app.allowed = !!r.allowed; app.exact = r.exact !== false;
+      if (app.timers) pull().then(push);           // what was pressed on the phone first, then the list as it now stands
+      // a camp is running and Android has not been asked yet whether the app may notify: ask once
+      if (app.timers && !app.allowed && !app.asked && !demo && camp()) { app.asked = true; E.ask('notify', { ask: true }).then(() => {}, () => {}); setTimeout(look, 4000); setTimeout(look, 12000); }
+      repaint();
+    }, () => { app.known = true; repaint(); });
+  }
+  look();
+  window.addEventListener('eveops-resume', look);
+  let lastTick = Date.now(), pulledAt = 0;
+  setInterval(() => {
+    const c = camp(), now = Date.now(), was = lastTick;
+    lastTick = now;
+    if (!c) return;
+    if (roll()) return save();
+    if (app.timers && !demo && !document.hidden && now - pulledAt > 5000) { pulledAt = now; pull(); }
+    if (!document.querySelector('.ex .camp')) return;
+    let crossed = Math.floor(now / MIN) !== Math.floor(was / MIN);          // once a minute the wording may change ("gone by", "15 minutes left")
+    document.querySelectorAll('.ex [data-until], .ex [data-since]').forEach(el => {
+      const u = Number(el.getAttribute('data-until')), s0 = Number(el.getAttribute('data-since'));
+      if (u) { if (was < u && now >= u) crossed = true; el.textContent = L.clock(u - now); } else el.textContent = L.clock(now - s0);
+    });
+    if (crossed) repaint();
+  }, 1000);
+
+  function campSetup() {
+    const d = U.camp, ended = D.camps.filter(c => c.status === 'ended');
+    const field = (keep, key, name, more) => h('label', { class: 'ex-field' }, name + ' ', h('input', Object.assign({ class: 'ex-in', type: 'text', 'data-keep': keep, 'aria-label': name, value: d[key], oninput: e => { d[key] = e.target.value; } }, more)));
+    return [h('section', { class: 'block ex-block camp-setup', id: 'camp-setup' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Set up a camp'), h('span', { class: 'why' }, 'entered by hand; the Wormholes tab keeps the live chain')),
+      field('camp-sys', 'system_name', 'System', { placeholder: 'e.g. J123405' }),
+      h('span', { class: 'ex-field' }, 'Class ', seg('Class', X.classes.map(c => [c, c]), d.system_class, v => { d.system_class = v; repaint(); })),
+      field('camp-statics', 'statics', 'Statics', { placeholder: 'e.g. highsec, C3' }),
+      h('span', { class: 'ex-field' }, 'Stage ', seg('Stage', X.stages.map(x => [x.key, x.label]), d.stage_type, v => { d.stage_type = v; repaint(); })),
+      U.note ? h('p', { class: 'note neg' }, U.note) : null,
+      h('div', { class: 'tools' }, h('button', { type: 'button', class: 'btn', onclick: () => {
+        if (!d.system_name.trim()) { U.note = 'Name the system first.'; return repaint(); }
+        const id = uid('c'), list = night0();
+        D.camps.push({ id, system_name: d.system_name.trim(), system_class: d.system_class, statics: d.statics.trim(), stage_type: d.stage_type, start_date: Date.now(), status: 'setup', nights: [],
+          holes: d.statics.split(/[,;/]+/).map(x => x.trim()).filter(Boolean).map(x => ({ id: uid('h'), destination: x + ' static', state: 'fresh', eol_at: null, picketed: false, bookmarked: false })) });
+        if (list && list.camp_id == null) list.camp_id = id;              // the checklist ticked while getting ready is this camp's
+        else D.checklists.push({ id: uid('k'), camp_id: id, kind: 'night0', items: X.night0.map(l => ({ label: l, checked: false, checked_at: null })) });
+        U.camp = { system_name: '', system_class: 'C2', statics: '', stage_type: 'nomad' }; U.note = ''; save();
+      } }, 'Create the camp')),
+      h('p', { class: 'note' }, 'Seats come from Muster. A hole is put on the board for each static; add the rest as they are scanned.')),
+    ended.length ? h('section', { class: 'block ex-block', id: 'camp-earlier' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Earlier camps')),
+      ended.slice().reverse().map(c => h('div', { class: 'lognight' },
+        h('h4', null, c.system_name, h('span', { class: 'sub' }, dayName(c.start_date) + (c.ended_at ? ' to ' + dayName(c.ended_at) : '') + ', ' + plural(c.nights.length, 'night'))),
+        h('div', { class: 'tools' }, c.nights.map(n => h('button', { type: 'button', class: 'btn btn-quiet copy-btn', onclick: e => copyText(e.currentTarget, nightMd(c, n)) }, 'Copy Night ' + n.n + ' as Markdown')))))) : null];
+  }
+
+  function statusLine(c) {
+    const n = nightOf(c), w = openWin(c), m = mode(), last = c.nights[c.nights.length - 1], off = X.modes.filter(x => x !== m);
+    return h('section', { class: 'camp-status', id: 'camp-status' },
+      h('div', { class: 'cs' }, h('span', { class: 'cs-k' }, 'Camp'), h('b', null, c.system_name),
+        h('span', { class: 'sub' }, [c.system_class, c.statics ? 'statics: ' + c.statics : '', (X.stages.find(x => x.key === c.stage_type) || {}).label].filter(Boolean).join(' · '))),
+      h('div', { class: 'cs' }, h('span', { class: 'cs-k' }, 'Night'), h('b', null, n ? String(n.n) : last ? 'Night ' + last.n + ' ended' : 'Not started'),
+        h('span', { class: 'sub' }, n ? 'since ' + dayName(n.started_at) + ' ' + hm(n.started_at) : last ? dayName(last.ended_at) + ' ' + hm(last.ended_at) : 'Night 0 checklist first')),
+      h('div', { class: 'cs' }, h('span', { class: 'cs-k' }, 'Window'), w ? h('b', null, typeName(w.type), ' ', face('since', w.start)) : h('b', null, 'None running'),
+        w ? h('span', { class: 'sub' }, 'since ' + hm(w.start)) : null),
+      h('div', { class: 'cs cs-adam' }, h('span', { class: 'cs-k' }, 'Adam'), h('b', null, m.name, ' in the ' + m.hull),
+        h('span', { class: 'sub' }, off.map(x => x.name + ' and the ' + x.hull).join(', ') + ': logged off'),
+        seg('Adam’s mode', X.modes.map(x => [x.key, x.name.split(' ')[0] + '-mode']), D.adam_mode, setMode)));
+  }
+
+  const holeWords = hl => (hl.destination || 'unnamed hole') + ' ' + hl.state + (hl.eol_at ? ', end of life since ' + hm(hl.eol_at) : '') + (hl.picketed ? ', picketed' : '');
+  /** The re-entry card: what a returning quartermaster needs before touching anything. */
+  function leftOff(c) {
+    const n = nightOf(c), last = c.nights[c.nights.length - 1], list = night0(), ticked = list.items.filter(i => i.checked).length, ready = ticked === list.items.length;
+    const wins = D.windows.filter(w => w.camp_id === c.id && w.end).sort((a, b) => a.start - b.start), lw = wins[wins.length - 1];
+    const of = k => wins.filter(w => w.night === k), total = ws => ws.reduce((a, w) => a + (w.end - w.start), 0);
+    const lines = [];
+    if (!last) lines.push('Camp set up ' + dayName(c.start_date) + '. Night 1 has not started.');
+    else if (n) lines.push('Night ' + n.n + ' has been running since ' + dayName(n.started_at) + ' ' + hm(n.started_at) + ': ' + (of(n.n).length ? plural(of(n.n).length, 'window') + ' so far, ' + L.span(total(of(n.n))) + ' in all' : 'no window run yet') + '.');
+    else lines.push('Night ' + last.n + ' ended ' + dayName(last.ended_at) + ' ' + hm(last.ended_at) + ': ' + (of(last.n).length ? plural(of(last.n).length, 'window') + ', ' + L.span(total(of(last.n))) + ' in all' : 'no windows were run') + '.');
+    if (lw) lines.push(['Last window: ', h('b', null, typeName(lw.type)), ', ' + dayName(lw.start) + ' ' + hm(lw.start) + ' to ' + hm(lw.end) + ' (' + L.span(lw.end - lw.start) + '), Adam flying ' + modeName(lw.adam_mode) + ', with ' + others(lw) + '.',
+      lw.pickets.length ? ' Picket: ' + lw.pickets.map(p => pname(p.pilot_id)).join(', then ') + '.' : '', lw.note ? [' Note: ', h('i', null, lw.note)] : '']);
+    lines.push(c.holes.length ? 'Holes as last recorded: ' + c.holes.map(holeWords).join('; ') + '.' : 'No holes on the board.');
+    lines.push('Bank totals by ship come with the next phase.');
+    const startNight = () => { c.nights.push({ n: c.nights.length + 1, started_at: Date.now(), ended_at: null }); c.status = 'active'; save(); };
+    return h('section', { class: 'block ex-block camp-left', id: 'camp-left' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Where we left off')),
+      h('ul', { class: 'left-lines' }, lines.map(l => h('li', null, l))),
+      !last ? [h('h4', { class: 'camp-sub' }, 'Night 0 checklist', h('span', { class: 'chip ' + (ready ? 'chip-lead' : 'chip-hold') }, ticked + ' of ' + list.items.length)), checks(list)] : null,
+      h('div', { class: 'tools' },
+        n ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { n.ended_at = Date.now(); save(); } }, 'End Night ' + n.n)
+          : h('button', { type: 'button', class: 'btn', disabled: !last && !ready, onclick: startNight }, 'Start Night ' + (c.nights.length + 1)),
+        !n && last ? h('button', { type: 'button', class: 'btn btn-quiet copy-btn', onclick: e => copyText(e.currentTarget, nightMd(c, last)) }, 'Copy Night ' + last.n + ' as Markdown') : null),
+      !last && !ready ? h('p', { class: 'note' }, 'Night 1 can start once every Night 0 box is ticked.') : null);
+  }
+
+  /** The window about to start, with what was left unset filled in: everyone present, the seats' order on picket. */
+  function winDraft() {
+    const d = U.win, crew = D.pilots.filter(p => !p.is_adam).map(p => p.id), type = X.windows.find(w => w.key === d.type) || X.windows[0];
+    const present = (d.present || crew).filter(id => crew.indexOf(id) >= 0);
+    const seated = ['m1', 'm2', 'm3'].map(k => D.seats[k]).filter(Boolean);
+    const all = present.concat([adam().id]);
+    const order = (d.order || (seated.length ? seated : crew)).filter(id => all.indexOf(id) >= 0 && (d.order || present.indexOf(id) >= 0));
+    return { type: type.key, picket: type.picket, present, order: type.picket ? order : [], interval: Math.max(1, Math.round(Number(d.interval) || T.picket_min)), crew };
+  }
+  function windowStart(c) {
+    const v = winDraft(), d = U.win;
+    const flip = (list, id) => (list.indexOf(id) >= 0 ? list.filter(x => x !== id) : list.concat([id]));
+    return h('section', { class: 'block ex-block camp-start', id: 'camp-start' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Start a window')),
+      h('p', { class: 'ex-field' }, seg('Window type', X.windows.map(w => [w.key, w.label]), v.type, k => { d.type = k; repaint(); })),
+      h('div', { class: 'q' }, h('h5', null, 'Who is here'),
+        h('div', { class: 'chips' }, h('span', { class: 'pick is-on is-fixed' }, 'Adam, flying ' + mode().name),
+          v.crew.map(id => h('button', { type: 'button', class: 'pick' + (v.present.indexOf(id) >= 0 ? ' is-on' : ''), 'aria-pressed': v.present.indexOf(id) >= 0 ? 'true' : 'false',
+            onclick: () => { d.present = flip(v.present, id); d.order = v.order.filter(x => x === adam().id || d.present.indexOf(x) >= 0); repaint(); } }, pname(id))))),
+      v.picket ? h('div', { class: 'q' }, h('h5', null, 'Picket rotation', h('span', { class: 'sub' }, 'press the names in the order they take the picket')),
+        h('div', { class: 'chips' }, v.present.concat([adam().id]).map(id => { const at = v.order.indexOf(id);
+          return h('button', { type: 'button', class: 'pick' + (at >= 0 ? ' is-on' : ''), 'data-rot': id, 'aria-pressed': at >= 0 ? 'true' : 'false', onclick: () => { d.order = flip(v.order, id); repaint(); } },
+            at >= 0 ? h('span', { class: 'pick-n' }, at + 1) : null, pname(id)); })),
+        h('label', { class: 'ex-field' }, 'Change every ', h('input', { class: 'ex-in ex-num', type: 'text', inputmode: 'numeric', 'data-keep': 'win-every', 'aria-label': 'Minutes between picket changes', value: String(d.interval), oninput: e => { d.interval = e.target.value; } }), ' minutes'),
+        h('p', { class: 'note' }, !v.order.length ? 'Nobody chosen: this window runs with no picket.' : v.order.length === 1 ? pname(v.order[0]) + ' pickets for the whole window: no rotation, so nothing rings.'
+          : 'The phone rings at each change with who takes over, whether or not anyone touches it.')) : null,
+      h('div', { class: 'tools' }, h('button', { type: 'button', class: 'btn', onclick: () => {
+        const now = Date.now(), w = { id: uid('w'), camp_id: c.id, night: nightOf(c).n, type: v.type, start: now, end: null, pilot_ids: [adam().id].concat(v.present), adam_mode: D.adam_mode, note: '', pickets: [] };
+        D.windows.push(w);
+        D.timers.push({ id: uid('t'), camp_id: c.id, kind: 'window', label: typeName(v.type) + ' window', ends_at: null, rotation_order: [], started_at: now, window_id: w.id });
+        if (v.order.length) D.timers.push({ id: uid('t'), camp_id: c.id, kind: 'picket', label: 'Picket rotation', ends_at: now + v.interval * MIN, rotation_order: v.order, started_at: now, since: now, turn: 0, interval_min: v.interval, acked: null, window_id: w.id });
+        d.present = d.order = null; save();
+      } }, 'Start the ' + typeName(v.type) + ' window')));
+  }
+
+  function picketCard(t, w) {
+    const o = t.rotation_order, n = o.length, on = o[t.turn % n], next = o[(t.turn + 1) % n], now = Date.now();
+    const pending = n > 1 && t.since > t.started_at && t.acked !== t.since && now - t.since < 15 * MIN;       // a change the phone rang for, not yet confirmed
+    const snooze = (boundary, until) => { const r = L.picketSnooze(t, w.pickets, boundary, until); if (r.ok) { Object.assign(t, r.timer); w.pickets = r.stints; } save(); };
+    return h('div', { class: 'picket' + (pending ? ' is-due' : ''), id: 'camp-picket' },
+      h('div', { class: 'picket-on' }, h('span', { class: 'cs-k' }, 'On picket'), h('b', null, pname(on)), h('span', { class: 'sub' }, 'since ' + hm(t.since))),
+      n > 1 ? h('div', { class: 'picket-next' }, h('span', { class: 'cs-k' }, 'Next'), h('b', null, pname(next)), h('span', { class: 'sub' }, 'in ', face('until', t.ends_at), ', at ' + hm(t.ends_at)))
+        : h('div', { class: 'picket-next' }, h('span', { class: 'sub' }, 'No rotation: one pilot holds the picket.')),
+      n > 1 ? h('div', { class: 'tools' }, pending
+        ? [h('span', { class: 'picket-ask' }, pname(on) + ' took over at ' + hm(t.since) + '.'),
+          h('button', { type: 'button', class: 'btn', onclick: () => { t.acked = t.since; save(); } }, 'Confirmed'),
+          h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => snooze(t.since, Date.now() + T.snooze_min * MIN) }, 'Not yet: ' + T.snooze_min + ' more minutes')]
+        : [h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { const at = Date.now(); w.pickets.push({ pilot_id: on, from: t.since, to: at }); t.turn = (t.turn + 1) % n; t.since = at; t.ends_at = at + t.interval_min * MIN; t.acked = at; save(); } }, 'Change now'),
+          h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => snooze(t.ends_at, t.ends_at + T.snooze_min * MIN) }, T.snooze_min + ' more minutes for ' + pname(on))]) : null,
+      w.pickets.length ? h('p', { class: 'note' }, 'So far: ' + w.pickets.map(p => pname(p.pilot_id) + ' ' + hm(p.from) + ' to ' + hm(p.to)).join('; ') + '.') : null);
+  }
+  function endWindow(c, w) {
+    const now = Date.now();
+    roll();
+    for (const t of D.timers) if (t.kind === 'picket' && t.window_id === w.id) w.pickets.push({ pilot_id: t.rotation_order[t.turn % t.rotation_order.length], from: t.since, to: now });
+    D.timers = D.timers.filter(t => t.window_id !== w.id && !(t.kind === 'gas' && t.camp_id === c.id));
+    w.end = now;
+    // the hand-off to the ISK-per-hour module: one record per finished window
+    D.window_records.push({ window_id: w.id, camp_id: c.id, type: w.type, start: w.start, end: w.end, pilot_ids_present: w.pilot_ids.slice(), adam_mode: w.adam_mode });
+    save();
+  }
+  function windowCard(c, w) {
+    const p = D.timers.find(t => t.kind === 'picket' && t.window_id === w.id);
+    return h('section', { class: 'block ex-block camp-window', id: 'camp-window' },
+      h('div', { class: 'block-head' }, h('h3', null, typeName(w.type) + ' window'), face('since', w.start), h('span', { class: 'why' }, 'since ' + hm(w.start) + '; Adam flying ' + modeName(w.adam_mode) + ', with ' + others(w))),
+      p ? picketCard(p, w) : h('p', { class: 'note' }, 'No picket in this window.'),
+      h('label', { class: 'ex-field' }, 'Note ', text('wn-' + w.id, w.note, 'Window note', v => { w.note = v; }, { class: 'ex-in ex-wide', placeholder: 'one line on what happened' })),
+      h('div', { class: 'tools' }, h('button', { type: 'button', class: 'btn', onclick: () => endWindow(c, w) }, 'End the window')));
+  }
+
+  const eolTimer = hl => D.timers.find(t => t.kind === 'eol' && t.hole_id === hl.id);
+  function holeBoard(c) {
+    const tick = (name, on, set) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: on, onchange: e => { set(e.target.checked); save(); } }), h('span', null, name));
+    const setEol = (hl, at) => {
+      D.timers = D.timers.filter(t => !(t.kind === 'eol' && t.hole_id === hl.id));
+      hl.eol_at = at;
+      if (at) D.timers.push({ id: uid('t'), camp_id: c.id, kind: 'eol', label: hl.destination || 'an unnamed system', ends_at: at + T.eol_hours * 3600000, rotation_order: [], hole_id: hl.id });
+    };
+    return h('section', { class: 'block ex-block camp-holes', id: 'camp-holes' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Hole board'), h('span', { class: 'why' }, 'the camp’s control state, kept by hand')),
+      c.holes.length ? h('div', { class: 'holes' }, c.holes.map(hl => { const end = hl.eol_at ? hl.eol_at + T.eol_hours * 3600000 : 0, left = end - Date.now();
+        return h('div', { class: 'hole st-' + hl.state + (hl.eol_at ? ' is-eol' : ''), 'data-hole': hl.id },
+          text('hd-' + hl.id, hl.destination, 'Where it leads', v => { hl.destination = v; const t = eolTimer(hl); if (t) t.label = v || 'an unnamed system'; }, { class: 'ex-in hole-dest', placeholder: 'Where it leads' }),
+          seg('Mass', X.holeStates.map(x => [x.key, x.label]), hl.state, v => { hl.state = v; save(); }),
+          tick('End of life', !!hl.eol_at, on => setEol(hl, on ? Date.now() : null)),
+          hl.eol_at ? h('span', { class: 'hole-eol' + (left < 15 * MIN ? ' is-due' : '') },
+            h('label', { class: 'ex-field' }, 'first seen ', h('input', { class: 'ex-in ex-time', type: 'time', 'aria-label': 'When end of life was first seen', value: hm(hl.eol_at), onchange: e => {
+              const parts = e.target.value.split(':').map(Number), d = new Date();
+              if (parts.length < 2 || parts.some(isNaN)) return;
+              d.setHours(parts[0], parts[1], 0, 0);
+              if (d.getTime() > Date.now() + MIN) d.setDate(d.getDate() - 1);                // a time later than now was yesterday's
+              setEol(hl, d.getTime()); save();
+            } })),
+            left > 0 ? ['gone by ' + hm(end) + ' at the latest: ', face('until', end), ' left'] : 'should have closed by ' + hm(end)) : null,
+          tick('Picketed', hl.picketed, on => { hl.picketed = on; }),
+          tick('Bookmarked both sides', hl.bookmarked, on => { hl.bookmarked = on; }),
+          h('button', { type: 'button', class: 'trip-skip', title: 'Take this hole off the board', 'aria-label': 'Remove the hole to ' + (hl.destination || 'an unnamed system'), onclick: () => { setEol(hl, null); c.holes = c.holes.filter(x => x !== hl); save(); } }, '×')); }))
+        : h('p', { class: 'note' }, 'No holes on the board.'),
+      h('div', { class: 'tools' },
+        h('input', { class: 'ex-in', type: 'text', 'data-keep': 'hole-new', 'aria-label': 'New hole: where it leads', placeholder: 'Where it leads', value: U.hole, oninput: e => { U.hole = e.target.value; } }),
+        h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { c.holes.push({ id: uid('h'), destination: U.hole.trim(), state: 'fresh', eol_at: null, picketed: false, bookmarked: false }); U.hole = ''; save(); } }, 'Add a hole')),
+      h('p', { class: 'note' }, 'Ticking End of life starts a ' + T.eol_hours + '-hour timer from when it was first seen, with rings at ' + T.eol_warn_min.join(' and ') + ' minutes left.'));
+  }
+
+  /** How the alarms will reach him, said plainly, with the fix when there is one. */
+  function ringWords() {
+    if (demo) return ['Sample data does not ring the phone.'];
+    if (!E.native) return ['In a browser these only count down while this page is open. The alarms ring from the Eve Ops Android app.'];
+    if (!app.known) return ['Checking what the app can do…'];
+    if (!app.timers) return ['This build of the app cannot ring alarms. Install the newest Eve Ops app, then the timers ring with the phone folded.'];
+    if (!app.allowed) return ['Android is blocking notifications from Eve Ops, so nothing will ring. ',
+      h('button', { type: 'button', class: 'btn', onclick: () => { E.ask('notify', { ask: true }).then(() => {}, () => {}); setTimeout(look, 4000); setTimeout(look, 12000); } }, 'Ask Android to allow them'),
+      h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => E.tell('notify-settings', {}) }, 'Open Android’s settings for Eve Ops')];
+    return ['These ring on the phone with sound, with the app shut or the phone folded.' + (app.exact ? '' : ' Android has not allowed exact alarms, so they may ring a few minutes late.')];
+  }
+  function timersBlock(c) {
+    const now = Date.now(), mine = D.timers.filter(t => t.camp_id === c.id), gas = mine.filter(t => t.kind === 'gas'), eol = mine.filter(t => t.kind === 'eol').sort((a, b) => a.ends_at - b.ends_at);
+    return h('section', { class: 'block ex-block camp-timers', id: 'camp-timers' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Timers')),
+      h('p', { class: 'note ring' + (E.native && app.known && (!app.timers || !app.allowed) && !demo ? ' neg' : '') }, ringWords()),
+      gas.length || eol.length ? h('div', { class: 'tcards' },
+        gas.map(t => { const due = now >= t.ends_at;
+          return h('div', { class: 'tcard' + (due ? ' is-due' : ''), 'data-timer': 'gas' }, h('span', { class: 'cs-k' }, 'Gas site'), h('b', null, t.label),
+            due ? h('span', null, 'Sleepers due. ', face('since', t.started_at), ' since first entry') : h('span', null, 'Sleepers in ', face('until', t.ends_at), '; entered ' + hm(t.started_at)),
+            h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { D.timers = D.timers.filter(x => x !== t); save(); } }, 'Left the site')); }),
+        eol.map(t => { const left = t.ends_at - now;
+          return h('div', { class: 'tcard' + (left < T.eol_warn_min[T.eol_warn_min.length - 1] * MIN ? ' is-due' : left < T.eol_warn_min[0] * MIN ? ' is-near' : ''), 'data-timer': 'eol' }, h('span', { class: 'cs-k' }, 'Hole, end of life'), h('b', null, t.label),
+            left > 0 ? h('span', null, face('until', t.ends_at), ' left at most; gone by ' + hm(t.ends_at)) : h('span', null, 'Should have closed by ' + hm(t.ends_at))); }))
+        : h('p', { class: 'note' }, 'No gas or hole timers running.'),
+      h('div', { class: 'tools' },
+        h('input', { class: 'ex-in', type: 'text', 'data-keep': 'gas-new', 'aria-label': 'Gas site name', placeholder: 'Gas site name', value: U.gas, oninput: e => { U.gas = e.target.value; } }),
+        h('button', { type: 'button', class: 'btn', onclick: () => { const at = Date.now();
+          D.timers.push({ id: uid('t'), camp_id: c.id, kind: 'gas', label: U.gas.trim() || 'Gas site ' + (gas.length + 1), ends_at: at + T.gas_min * MIN, rotation_order: [], started_at: at, acked: false }); U.gas = ''; save(); } }, 'Entered a gas site: start ' + T.gas_min + ' minutes')));
+  }
+
+  const nightMd = (c, n) => L.nightMarkdown({ camp: c, night: n, windows: D.windows.filter(w => w.camp_id === c.id && w.night === n.n), holes: c.holes, name: pname, mode: modeName, type: typeName, time: hm, day: dayName });
+  function logBlock(c) {
+    const nights = c.nights.slice().reverse();
+    return h('section', { class: 'block ex-block camp-log', id: 'camp-log' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Session log'), h('span', { class: 'why' }, 'window by window; the note can be changed afterwards')),
+      nights.length ? nights.map(n => { const wins = D.windows.filter(w => w.camp_id === c.id && w.night === n.n).sort((a, b) => b.start - a.start);
+        return h('div', { class: 'lognight', 'data-night': n.n },
+          h('h4', null, 'Night ' + n.n, h('span', { class: 'sub' }, dayName(n.started_at) + ' ' + hm(n.started_at) + (n.ended_at ? ' to ' + hm(n.ended_at) : ', running')),
+            h('button', { type: 'button', class: 'btn btn-quiet copy-btn', onclick: e => copyText(e.currentTarget, nightMd(c, n)) }, 'Copy Night ' + n.n + ' as Markdown')),
+          wins.length ? wins.map(w => h('div', { class: 'logwin' + (w.end ? '' : ' is-open') },
+            h('b', null, typeName(w.type)),
+            h('span', null, hm(w.start) + ' to ' + (w.end ? hm(w.end) + ' (' + L.span(w.end - w.start) + ')' : 'now')),
+            h('span', { class: 'sub' }, 'Adam flying ' + modeName(w.adam_mode) + '; with ' + others(w)),
+            w.pickets.length ? h('span', { class: 'sub' }, 'Picket: ' + w.pickets.map(p => pname(p.pilot_id) + ' ' + hm(p.from) + ' to ' + hm(p.to)).join('; ')) : null,
+            w.end ? text('ln-' + w.id, w.note, 'Note for the ' + typeName(w.type) + ' window', v => { w.note = v; }, { class: 'ex-in ex-wide', placeholder: 'note' }) : null))
+            : h('p', { class: 'note' }, 'No windows yet.')); })
+        : h('p', { class: 'note' }, 'Nothing logged yet.'));
+  }
+  function strikeBlock(c) {
+    const busy = !!nightOf(c);
+    return h('section', { class: 'block ex-block camp-strike', id: 'camp-strike' },
+      h('div', { class: 'block-head' }, h('h3', null, 'Strike camp')),
+      h('p', null, 'Agreed reasons to leave: ', X.exfil.join('; '), '.'),
+      h('p', { class: 'note' }, 'The strike checklist and the bank manifest are the next phase of this module. Until then a camp is ended by hand.'),
+      h('div', { class: 'tools' }, U.drop === 'camp'
+        ? [h('span', { class: 'neg' }, 'End the camp in ' + c.system_name + '? Its log is kept under Earlier camps.'),
+          h('button', { type: 'button', class: 'btn', onclick: () => { c.status = 'ended'; c.ended_at = Date.now(); D.timers = D.timers.filter(t => t.camp_id !== c.id); U.drop = null; save(); } }, 'End the camp'),
+          h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { U.drop = null; repaint(); } }, 'Keep it')]
+        : h('button', { type: 'button', class: 'btn btn-quiet', disabled: busy, onclick: () => { U.drop = 'camp'; repaint(); } }, 'End this camp'),
+        busy ? h('span', { class: 'sub' }, 'End the night first.') : null));
+  }
+  function campView() {
+    const c = camp();
+    if (!c) return h('div', { class: 'camp' }, campSetup());
+    if (roll()) { E.store.set(KEY, D); push(); }
+    const n = nightOf(c), w = openWin(c);
+    return h('div', { class: 'camp' }, statusLine(c), w ? windowCard(c, w) : leftOff(c), !w && n ? windowStart(c) : null, holeBoard(c), timersBlock(c), logBlock(c), strikeBlock(c));
   }
 
   // ------------------------------------------------------- export and import
@@ -325,7 +696,7 @@
           h('button', { type: 'button', class: 'btn btn-quiet copy-btn', onclick: e => copyText(e.currentTarget, markdown()) }, 'Copy the muster as Markdown'),
           E.native ? null : h('a', { class: 'btn btn-quiet', download: 'eve-ops-expedition.json', href: URL.createObjectURL(new Blob([json], { type: 'application/json' })) }, 'Save as a file'),
           h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { U.io = null; repaint(); } }, 'Close')),
-        h('p', { class: 'note' }, 'The JSON holds pilots, answers, kit, fits, stock and checklists. Keep a copy before changing phones: nothing here is stored anywhere but this device.'));
+        h('p', { class: 'note' }, 'The JSON holds pilots, answers, kit, fits, stock, checklists, camps, windows and timers. Keep a copy before changing phones: nothing here is stored anywhere but this device.'));
     }
     return h('section', { class: 'block ex-block ex-io' },
       h('div', { class: 'block-head' }, h('h3', null, 'Import'), h('span', { class: 'why' }, 'replaces what is in this module on this device')),
@@ -334,25 +705,28 @@
       h('div', { class: 'tools' },
         h('button', { type: 'button', class: 'btn', onclick: () => { let d = null; try { d = normal(JSON.parse(U.ioText)); } catch (err) { d = null; }
           if (!d) { U.note = 'That is not an export from this module, so nothing was changed.'; return repaint(); }
-          D = d; U.io = null; U.ioText = ''; U.note = ''; U.open = null; save(); } }, 'Replace with this'),
+          D = d; U.io = null; U.ioText = ''; U.note = ''; U.open = null; pushed = null; save(); } }, 'Replace with this'),
         h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { U.io = null; U.note = ''; repaint(); } }, 'Cancel')));
   }
 
   /** The whole Expedition view. `paint` redraws the page (and keeps a box being typed in). */
   function view(paint) {
     repaint = paint;
+    if (!U.tab) U.tab = camp() ? 'camp' : 'muster';          // mid-camp, the board is what he came for
     const tab = (key, name) => h('button', { type: 'button', class: 'view' + (U.tab === key ? ' is-on' : ''), 'aria-pressed': U.tab === key ? 'true' : 'false', onclick: () => { U.tab = key; repaint(); } }, name);
     return h('main', { class: 'ex' },
       h('header', { class: 'ex-head' },
         h('h2', null, 'Expedition ops'),
-        h('nav', { class: 'views', 'aria-label': 'Expedition sections' }, tab('muster', 'Muster'), tab('kit', 'Kit & Shopping')),
+        h('nav', { class: 'views', 'aria-label': 'Expedition sections' }, tab('camp', 'Camp'), tab('muster', 'Muster'), tab('kit', 'Kit & Shopping')),
         h('span', { class: 'ex-tools' },
           h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { U.io = U.io === 'export' ? null : 'export'; U.note = ''; repaint(); } }, 'Export'),
           h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { U.io = U.io === 'import' ? null : 'import'; U.note = ''; repaint(); } }, 'Import'))),
-      h('p', { class: 'note ex-lede' }, 'Kept on this device and usable with no network. Camp board, timers and the bank come in the next phases.'),
+      h('p', { class: 'note ex-lede' }, 'Kept on this device and usable with no network. The bank manifest and the strike checklist come in the next phase.'),
       ioView(),
-      U.tab === 'muster' ? musterView() : kitView());
+      U.tab === 'camp' ? campView() : U.tab === 'muster' ? musterView() : kitView());
   }
 
-  window.Ex = { view, data: () => D };
+  /** True once a camp's first night has started and until the camp is ended: the page then opens on the camp board. */
+  const campOpen = () => { const c = camp(); return !!c && c.status === 'active'; };
+  window.Ex = { view, data: () => D, campOpen };
 })();

@@ -49,7 +49,7 @@ const check = (label, ok, detail) => { if (!ok) failed++; console.log((ok ? 'ok 
   check('once Android allows them the warning goes without another press', /Android allows notifications from Eve Ops/.test(granted) && !/has not allowed/.test(granted), granted.slice(0, 200));
   await page.reload({ waitUntil: 'networkidle' }); await page.waitForTimeout(1500);
   const again = await page.evaluate(() => window.__sent.filter(m => m.op === 'notify').map(m => !!m.ask));
-  check('on the next start, with a notification wanted, the app is asked to prompt again', again[0] === true, JSON.stringify(again));
+  check('on the next start, with a notification wanted, the app is asked to prompt again', again.indexOf(true) >= 0, JSON.stringify(again));
 
   await page.click('.price >> nth=0').catch(() => {});
   check('a price tap copies through the app', (await page.evaluate(() => window.__sent.filter(m => m.op === 'copy').length)) === 1);

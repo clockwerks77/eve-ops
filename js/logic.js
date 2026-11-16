@@ -488,6 +488,111 @@
   /** Days to train `sp` skill points from nothing at `perHour` (EVE trains round the clock). */
   function trainDays(sp, perHour) { return sp / perHour / 24; }
 
+  // ------------------------------------------------ expedition: camp and timers
+  /** A countdown or a stopwatch reading: 4:05, 1:02:09. */
+  function clock(ms) {
+    const t = Math.max(0, Math.floor(Math.abs(ms) / 1000)), hh = Math.floor(t / 3600), mm = Math.floor(t % 3600 / 60), ss = t % 60;
+    return (hh ? hh + ':' + String(mm).padStart(2, '0') : mm) + ':' + String(ss).padStart(2, '0');
+  }
+  /**
+   * The picket rotation brought up to `now`. A picket timer holds { rotation_order, turn, since, ends_at, interval_min }:
+   * `turn` is who is on (an index into the order) since `since`, until `ends_at`. The rotation is taken as made when its
+   * time comes, whether or not anyone touched the phone, so the alerts keep coming in order.
+   * -> { timer, stints: [{ pilot_id, from, to }] } with one stint for every turn that ended.
+   */
+  function picketRoll(t, now) {
+    const out = Object.assign({}, t), stints = [], n = (t.rotation_order || []).length, step = (t.interval_min || 0) * 60000;
+    if (!n || !(step > 0)) return { timer: out, stints };
+    for (let guard = 0; now >= out.ends_at && guard < 1000; guard++) {
+      stints.push({ pilot_id: out.rotation_order[out.turn % n], from: out.since, to: out.ends_at });
+      out.turn = (out.turn + 1) % n; out.since = out.ends_at; out.ends_at += step;
+    }
+    return { timer: out, stints };
+  }
+  /**
+   * "Not yet": the rotation that was due at `boundary` is put off to `until`. If that rotation has already been taken as
+   * made, it is taken back: the last stint comes out of the log and the earlier pilot is still on.
+   * -> { timer, stints, ok } (ok false when the boundary is not this timer's last or next rotation).
+   */
+  function picketSnooze(t, stints, boundary, until) {
+    const out = Object.assign({}, t), log = (stints || []).slice(), n = (t.rotation_order || []).length;
+    if (n && boundary === t.ends_at) { out.ends_at = until; return { timer: out, stints: log, ok: true }; }
+    const last = log[log.length - 1];
+    if (n && boundary === t.since && last && last.to === boundary) {
+      log.pop(); out.turn = (t.turn - 1 + n) % n; out.since = last.from; out.ends_at = until; out.acked = null;
+      return { timer: out, stints: log, ok: true };
+    }
+    return { timer: out, stints: log, ok: false };
+  }
+  /**
+   * What the phone should ring for, soonest first. The Android app keeps this list and rings each alert at its time even
+   * when the app is shut, so the texts carry no clock times (a snooze on the phone moves the times, not the words).
+   * x: { timers, name(pilot_id), rules: C.expedition.timers } -> [{ id, group, at, title, text, late, actions }]
+   * `late` is a second ring if nobody confirms; `group` ties the alerts that a snooze moves together.
+   * An alert whose time has passed is listed only while its second ring is still to come.
+   */
+  function campAlerts(x, now) {
+    const r = x.rules, out = [], name = x.name, MIN = 60000;
+    for (const t of x.timers || []) {
+      if (t.kind === 'picket') {
+        const order = t.rotation_order || [], n = order.length, step = (t.interval_min || 0) * MIN;
+        if (n < 2 || !(step > 0)) continue;
+        const one = (b, off, on) => ({
+          id: t.id + ':' + b, group: t.id, at: b, title: 'Picket: ' + name(on) + ' takes over',
+          text: name(off) + ' comes off picket, ' + name(on) + ' goes on.',
+          late: { at: b + r.late_min * MIN, title: 'Picket change not confirmed', text: name(on) + ' should have relieved ' + name(off) + ' ' + r.late_min + ' minutes ago.' },
+          actions: ['done', 'snooze'] });
+        // the rotation just made, while its second ring is still to come
+        if (t.since > t.started_at && t.acked !== t.since && t.since + r.late_min * MIN > now) out.push(one(t.since, order[(t.turn - 1 + n) % n], order[t.turn % n]));
+        for (let k = 0; k < r.ahead; k++) {
+          const b = t.ends_at + k * step;
+          if (b - now > r.horizon_hours * 3600000) break;
+          if (b > now) out.push(one(b, order[(t.turn + k) % n], order[(t.turn + k + 1) % n]));
+        }
+      } else if (t.kind === 'gas') {
+        if (t.ends_at > now && !t.acked) out.push({ id: t.id, group: t.id, at: t.ends_at, title: 'Sleepers imminent: ' + t.label,
+          text: r.gas_min + ' minutes since first entry. Sleepers arrive at about 15 to 20 minutes.', late: null, actions: ['done'] });
+      } else if (t.kind === 'eol') {
+        for (const m of r.eol_warn_min) {
+          const at = t.ends_at - m * MIN;
+          if (at > now) out.push({ id: t.id + ':' + m, group: t.id, at, title: 'Hole to ' + t.label + ': ' + m + ' minutes left at most',
+            text: 'It was seen at end of life nearly ' + (r.eol_hours * 60 - m >= 120 ? Math.floor((r.eol_hours * 60 - m) / 60) + ' hours' : (r.eol_hours * 60 - m) + ' minutes') + ' ago and can close at any time.', late: null, actions: ['done'] });
+        }
+      }
+    }
+    return out.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+  }
+  /**
+   * One camp night as Markdown for the notes vault.
+   * x: { camp, night: { n, started_at, ended_at }, windows, holes, name(pilot_id), mode(key), type(key), time(ts), day(ts) }
+   */
+  function nightMarkdown(x) {
+    const c = x.camp, n = x.night, wins = (x.windows || []).slice().sort((a, b) => a.start - b.start), cell = v => String(v).replace(/\|/g, '/');
+    const out = ['# Camp — Night ' + n.n, ''];
+    out.push((c.system_name || 'System not named') + (c.system_class ? ' (' + c.system_class + (c.statics ? ', statics: ' + c.statics : '') + ')' : '') + '. ' + (c.stage_type === 'home' ? 'Staged from J142117.' : 'Nomad camp.'));
+    out.push('Night ' + n.n + ': ' + x.day(n.started_at) + ' ' + x.time(n.started_at) + (n.ended_at ? ' to ' + x.time(n.ended_at) : ', still running') + '.', '');
+    out.push('## Windows', '');
+    if (!wins.length) out.push('No windows were run.');
+    else {
+      const total = wins.reduce((a, w) => a + ((w.end || w.start) - w.start), 0);
+      out.push('| Window | Start | End | Length | Adam flew | Pilots | Picket |', '|---|---|---|---|---|---|---|');
+      for (const w of wins) {
+        out.push('| ' + [x.type(w.type), x.time(w.start), w.end ? x.time(w.end) : 'running', w.end ? span(w.end - w.start) : '', x.mode(w.adam_mode), w.pilot_ids.map(x.name).join(', '),
+          (w.pickets || []).map(p => x.name(p.pilot_id) + ' ' + x.time(p.from) + ' to ' + x.time(p.to)).join('; ') || 'none'].map(cell).join(' | ') + ' |');
+      }
+      out.push('', wins.length + (wins.length === 1 ? ' window, ' : ' windows, ') + span(total) + ' in all.');
+    }
+    out.push('', '## Notes', '');
+    const noted = wins.filter(w => w.note);
+    if (noted.length) noted.forEach(w => out.push('- ' + x.type(w.type) + ', ' + x.time(w.start) + ': ' + w.note)); else out.push('No notes.');
+    out.push('', '## Bank', '', 'Not recorded yet: the bank manifest is the next phase of this module.');
+    out.push('', '## Holes as last recorded', '');
+    if ((x.holes || []).length) for (const hl of x.holes) {
+      out.push('- ' + (hl.destination || 'Unnamed hole') + ': ' + hl.state + (hl.eol_at ? ', end of life seen ' + x.time(hl.eol_at) : '') + ', ' + (hl.picketed ? 'picketed' : 'not picketed') + ', ' + (hl.bookmarked ? 'bookmarked both sides' : 'not bookmarked both sides'));
+    } else out.push('No holes on the board.');
+    return out.join('\n') + '\n';
+  }
+
   // ---------------------------------------------------- sync between devices
   /** JSON with every object's keys in order, so two equal documents give equal text. */
   function stable(v) {
@@ -764,7 +869,7 @@
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
-    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
+    orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, clock, picketRoll, picketSnooze, campAlerts, nightMarkdown, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };
 });

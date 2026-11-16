@@ -524,3 +524,84 @@ select.ex-in { width: auto; min-width: 11rem; }
   .ex-head h2 { width: 100%; }
   .ex-tools { margin-left: 0; }
 }
+
+/* ------------------------------------------------------------ camp board */
+/* Read at a glance and worked with a thumb: big clocks, few words, the urgent thing in colour. */
+.camp { display: flex; flex-direction: column; }
+.camp > * { order: 5; }
+.camp-status { order: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.6rem; margin-top: 1rem; }
+.camp-window, .camp-left { order: 2; }
+.camp-start { order: 3; }
+.cs { display: grid; gap: 0.15rem; align-content: start; background: var(--hull); border-left: 3px solid var(--seam); padding: 0.55rem 0.8rem 0.65rem; min-width: 0; }
+.cs b { font-size: 1.25rem; font-weight: 600; }
+.cs-adam { border-left-color: var(--lead); }
+.cs-adam .seg { justify-self: start; margin-top: 0.3rem; }
+.cs-k { color: var(--dim); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.clockface { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--isk); }
+.camp-window .block-head .clockface { font-size: 1.5rem; }
+.left-lines { list-style: none; display: grid; gap: 0.35rem; margin-top: 0.6rem; max-width: 70rem; }
+.left-lines li { border-left: 3px solid var(--seam); padding-left: 0.7rem; }
+.left-lines li:first-child { border-left-color: var(--lead); font-size: 1.08rem; }
+.camp-sub { display: flex; align-items: center; gap: 0.7rem; font-size: 1.05rem; font-weight: 600; margin: 0.9rem 0 0.2rem; }
+.camp .tools { align-items: center; }
+.camp .btn:disabled { opacity: 0.45; cursor: default; }
+/* names to press: who is here, and the picket order */
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.pick { display: inline-flex; align-items: center; gap: 0.45rem; background: none; border: 1px solid var(--seam); border-radius: 999px; padding: 0.3rem 0.85rem; color: var(--dim); font: inherit; font-weight: 500; cursor: pointer; }
+.pick.is-on { border-color: var(--lead); color: var(--ink); background: color-mix(in srgb, var(--lead) 14%, transparent); }
+.pick.is-fixed { cursor: default; }
+.pick-n { display: inline-grid; place-items: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; background: var(--lead); color: var(--void); font-size: 0.82rem; font-weight: 700; }
+/* the picket: who is on, who is next, when */
+.picket { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.6rem 1.5rem; align-items: start; background: var(--hull); border-left: 3px solid var(--lead); padding: 0.7rem 0.9rem 0.8rem; margin: 0.7rem 0; }
+.picket.is-due { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--hull)); }
+.picket-on, .picket-next { display: grid; gap: 0.1rem; }
+.picket-on b { font-size: 1.7rem; font-weight: 600; }
+.picket-next b { font-size: 1.3rem; font-weight: 600; }
+.picket-next .clockface { font-size: 1.3rem; }
+.picket > .tools, .picket > .note { grid-column: 1 / -1; margin-top: 0; }
+.picket-ask { font-weight: 600; color: var(--warn); }
+/* holes */
+.holes { display: grid; gap: 0.5rem; margin-top: 0.6rem; }
+.hole { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1.2rem; background: var(--hull); border-left: 3px solid var(--lead); padding: 0.5rem 2.2rem 0.5rem 0.8rem; position: relative; }
+.hole.st-unstable { border-left-color: var(--warn); }
+.hole.st-critical, .hole.is-eol { border-left-color: var(--bad); }
+.hole .check { padding: 0; }
+.hole .ex-field { margin: 0; }
+.hole-dest { width: 12rem; font-weight: 600; }
+.hole-eol { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; color: var(--dim); }
+.hole-eol.is-due, .hole-eol.is-due .clockface { color: var(--bad); }
+.hole .trip-skip { position: absolute; top: 0.45rem; right: 0.6rem; font-size: 1.2rem; }
+.ex-time { width: 7rem; color-scheme: dark; }
+/* gas and hole timers */
+.tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr)); gap: 0.6rem; margin-top: 0.6rem; }
+.tcard { display: grid; gap: 0.2rem; align-content: start; justify-items: start; background: var(--hull); border-left: 3px solid var(--calm); padding: 0.6rem 0.8rem 0.7rem; }
+.tcard b { font-size: 1.15rem; font-weight: 600; }
+.tcard .clockface { font-size: 1.5rem; }
+.tcard.is-near { border-left-color: var(--warn); }
+.tcard.is-due { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--hull)); }
+.tcard.is-due .clockface { color: var(--bad); }
+.tcard .btn { margin-top: 0.3rem; }
+.ring .btn { margin: 0.3rem 0.4rem 0 0; }
+/* the log */
+.lognight { margin-top: 0.9rem; }
+.lognight h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.9rem; font-size: 1.15rem; font-weight: 600; }
+.lognight h4 .sub { display: inline; }
+.lognight h4 .btn { margin-left: auto; font-size: 1rem; font-weight: 500; }
+.logwin { display: grid; grid-template-columns: 7rem minmax(10rem, 14rem) minmax(0, 1fr); gap: 0.15rem 1.2rem; align-items: baseline; border-top: 1px solid var(--seam); padding: 0.5rem 0; }
+.logwin.is-open b { color: var(--isk); }
+.logwin .sub { grid-column: 3; }
+.logwin .ex-in { grid-column: 3; width: 100%; max-width: 40rem; }
+.logwin > span:nth-child(3) { grid-column: 3; grid-row: 1; }
+@media (max-width: 760px) {
+  /* the cover screen: the window, its picket and the timers come before the holes */
+  .camp-timers { order: 4; }
+  .camp-status { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+  .camp-status .cs:first-child, .cs-adam { grid-column: 1 / -1; }
+  .cs b { font-size: 1.1rem; }
+  .picket-on b { font-size: 2rem; }
+  .picket .btn, .tcard .btn, .camp-window > .tools .btn, .camp-start > .tools .btn { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+  .logwin { grid-template-columns: 1fr; }
+  .logwin .sub, .logwin .ex-in, .logwin > span:nth-child(3) { grid-column: 1; grid-row: auto; }
+  .hole-dest { width: 100%; }
+  .lognight h4 .btn { margin-left: 0; }
+}

@@ -115,6 +115,21 @@ window.EVEOPS_CONFIG = {
       { item: 'Mobile Tractor Unit', label: 'Tractor units', base: 2, per: 'camp', doubled: false },
       { item: '', label: 'Salvage destroyer', base: 1, per: 'camp', doubled: false },
     ],
+    // The camp's day is these session types. `picket` says whether a picket rotation is offered when one starts.
+    windows: [
+      { key: 'mining', label: 'Mining', picket: true },
+      { key: 'gas', label: 'Gas', picket: true },
+      { key: 'ratting', label: 'Ratting', picket: true },
+      { key: 'defence', label: 'Defence', picket: false },
+      { key: 'exploration', label: 'Exploration', picket: false },
+    ],
+    exfil: ['active residents return', 'repeated hunter sightings on the chain', 'a key hole goes unstable with the bank still inside'],
+    classes: ['C1', 'C2', 'C3', 'C4', 'C5', 'C6'],
+    stages: [{ key: 'nomad', label: 'Nomad camp' }, { key: 'home', label: 'J142117, the corp home' }],
+    holeStates: [{ key: 'fresh', label: 'Fresh' }, { key: 'unstable', label: 'Unstable' }, { key: 'critical', label: 'Critical' }],
+    // Timers, in minutes unless named otherwise. `late_min`: the second ring when a picket change is not confirmed.
+    // `ahead` and `horizon_hours`: how many picket changes the phone is told about in advance.
+    timers: { picket_min: 45, snooze_min: 10, late_min: 5, gas_min: 15, eol_hours: 4, eol_warn_min: [60, 15], ahead: 12, horizon_hours: 10 },
     night0: ['Fits simulated', 'Shopping done', 'Wanderer access confirmed', 'Comms confirmed', 'Shared bookmark folder confirmed', 'Rescue frigates staged in Rens'],
   },
 

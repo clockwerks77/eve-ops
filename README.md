@@ -59,7 +59,7 @@ Wormhole statics, effects and wormhole types in `js/whdata.js` are derived from 
 
 ## Expedition tab
 
-Planning for the four-pilot wormhole camp. Phase A is built: Muster, and Kit & Shopping. The camp board, timers, the session log, the bank and the strike sequence are later phases.
+Planning and running the four-pilot wormhole camp. Built so far: Muster, Kit & Shopping (Phase A) and the Camp board with its timers and session log (Phase B). The bank manifest and the strike checklist are the next phase.
 
 - **No sign-in and no network needed.** Open `#expedition` (or the link on the sign-in screen) and it works. Everything typed here is kept on this device only, under the storage key `eveops.expedition`. It is deliberately left out of the optional GitHub sync, because it holds other people's names.
 - **Adam is one seat.** Khiana Kyn and Todashi Kitsune are on one account, so they are one pilot with a mode switch (Khiana-mode: scout and combat lead in the Odysseus; Todashi-mode: boosts and compression in the Porpoise). The other character always reads as logged off, and Adam cannot be put in a second seat.
@@ -68,6 +68,20 @@ Planning for the four-pilot wormhole camp. Phase A is built: Muster, and Kit & S
 - **Night 0 checklist**, with the time each box was ticked.
 - **Export and Import.** Export copies the whole module as JSON (or saves a file in a browser) and the muster as Markdown; Import replaces what is on the device with a pasted export. Do this before changing phones.
 - The starting stock figures, the training estimates and the standard kit are in `js/config.js` under `expedition`.
+
+**Camp board.** The first section of the tab, and where the tab opens while a camp exists. Once a camp's first night has started, opening the page with no address (the app's icon) lands here instead of on Trading, until the camp is ended; links and widgets that name a view still go to that view.
+
+- **Setting up:** system, class, statics and stage are typed in. A hole is put on the board for each static. Night 1 cannot start until every Night 0 box is ticked.
+- **Status line:** the camp, the night, the window that is running, and which of Adam's two characters is logged in (the other reads as logged off). Switching mode during a window changes that window's record.
+- **Where we left off:** shown whenever no window is running: when the night started or ended, the last window (type, times, who flew, who picketed, its note) and the holes as last recorded.
+- **Windows:** Mining, Gas, Ratting, Defence or Exploration. Starting one takes who is present and the picket order (the seats' order unless changed) and how often the picket changes (45 minutes unless changed). Ending one writes a `WindowRecord` (`window_id`, `camp_id`, `type`, `start`, `end`, `pilot_ids_present`, `adam_mode`) into the store for the later ISK-per-hour module.
+- **Picket rotation:** changes are taken as made when their time comes, whether or not anyone touches the phone, so the rings keep coming in order and the log records who picketed when. A change can be confirmed (which stops the second ring), put off ten minutes (the earlier pilot stays on and the whole rotation moves), or made early.
+- **Hole board:** where each hole leads, its mass state, end of life with the time it was first seen, picketed, bookmarked both sides. Kept by hand; the Wormholes tab has the live chain.
+- **Timers:** a picket change rings with the next pilot's name and rings once more five minutes later if nobody confirms it; a gas site rings 15 minutes after entry; a hole at end of life rings at 60 and at 15 minutes left of its four hours. Times are stored, so they survive closing the page.
+- **Session log:** every window by night, with its note, and one Markdown summary per night to copy into a notes vault.
+- **Ending a camp** is by hand until the strike checklist exists. Its log stays under Earlier camps.
+
+The timers ring only from the Android app (build 1.0.11 or newer): the page hands the app the list of what to ring for, and the app sets one Android alarm per ring, so they sound with the app shut or the phone folded, and are set again after the phone restarts. They play on the alarm volume, so they are heard with the phone on silent; Android's notification settings for the app list them as "Camp timers". Confirm and Snooze on a notification work without opening the app. In an ordinary browser the board only counts down while it is open, and says so.
 
 The page also keeps a copy of itself on the device (`sw.js`), so it opens with no network. Trading and Wormholes still need EVE's servers for their numbers; the Expedition tab does not.
 
@@ -89,6 +103,7 @@ How it fits together:
 - **Text follows the widget's size.** For each size a widget is shown at, the app shows as many whole lines as fit and draws them as large as that size allows (`Fit` in `Faces.kt`). Resizing a widget redraws it. Lower lines drop first on a small widget.
 - A tap on a widget opens the matching view.
 - **Notifications** (off until you turn one on in the dashboard's Phone notifications panel, shown in the app): an order loses the lead, extractors stop, a launchpad is nearly full. The page lists what there is to say in the summary it hands the app; the app (`Alerts.kt`) tells you once about each new thing after a background refresh, and stays quiet while the dashboard is on screen. Android asks once whether Eve Ops may notify; the panel can ask again, and from build 1.0.10 it can open Android's notification settings for the app.
+- **Camp timers** (`Timers.kt`): the Expedition tab hands over the list of what to ring for; the app keeps it, sets one alarm-clock alarm per ring, posts them on the "Camp timers" channel, and keeps what was pressed on a notification until the page next asks. Because they are alarm-clock alarms, the phone's own "next alarm" indicator shows the next camp ring.
 
 Getting the APK: GitHub builds it (`.github/workflows/android.yml`). Every push under `android/` is compiled, unit-tested and run on an emulator against the sample data. A release with the APK attached is published when a commit changes `android/RELEASE` (put the next number in it), or from the Actions tab: *Android app* → *Run workflow*.
 
@@ -136,6 +151,7 @@ Push to `main`. Bump the version number in `index.html` (the `eveops-version` me
   - `node tools/copy-test.js` presses price buttons on the sample data and checks the copied marks (clipboard, progress, Undo, clear)
   - `node tools/board-test.js` works the trip plan and the weekly close on the sample data
   - `node tools/sync-test.js` runs two stand-in devices against a stand-in for GitHub's gist API and checks that marks, pins and tracker figures travel
+  - `node tools/camp-test.js` runs a camp night on the Camp board with the clock moved by hand and a stand-in for the app: the Night 0 gate, a picket rotation across three pilots, what the app is told to ring for, a snooze from the phone, gas and hole timers, the log, the Markdown, reopening on the re-entry card
   - `node tools/expedition-test.js` works the Expedition view with nobody signed in: Adam's one seat, a pilot's muster questions, kit readiness, the shopping list, export and import, and a reload with the network off
   - `node tools/app-link-test.js` checks the page's side of the Android app link with a stand-in for the app (give it a file name to rewrite the Android test fixture `android/app/src/test/resources/snapshot-demo.json`)
   - `tools/ci.sh [commit]` waits for GitHub's Android build and emulator run and prints what they reported
