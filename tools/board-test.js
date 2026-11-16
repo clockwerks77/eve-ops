@@ -1,7 +1,7 @@
 // Works the order rows, the trip plan, the cargo hold, the weekly close and the tracker cost import on the sample data (#demo).
 //   node tools/board-test.js
 const assert = require('assert');
-const { serve, playwright, chrome } = require('./serve.js');
+const { serve, playwright, chrome, midweek } = require('./serve.js');
 (async () => {
   const server = await serve(8144);
   const browser = await playwright().chromium.launch({ executablePath: chrome, args: ['--no-sandbox'] });
@@ -9,6 +9,7 @@ const { serve, playwright, chrome } = require('./serve.js');
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.route('https://images.evetech.net/**', r => r.abort());
+  await midweek(page);
   await page.goto('http://localhost:8144/#demo', { waitUntil: 'networkidle' });
   await page.waitForTimeout(600);
   const ok = (name, cond, detail) => { assert.ok(cond, name + (detail ? ' (' + detail + ')' : '')); console.log('ok  ', name); };
@@ -106,6 +107,20 @@ const { serve, playwright, chrome } = require('./serve.js');
 
   const j = (await rows.nth(1).locator('td').allInnerTexts()).map(t => t.split('\n')[0]);
   ok('fees, wallet change and wallet at close come from the journal', /^[-−]/.test(j[5]) && /^[+-−]/.test(j[6]) && /^\d{1,3}(,\d{3})+$/.test(j[7]));
+  // ---- sections under the orders fold down to their heading line
+  await page.locator('.tab', { hasText: 'Jita' }).click(); await page.waitForTimeout(200);
+  const fold = name => page.locator('.fold', { hasText: name });
+  const part = name => page.locator('.block, .pi', { has: fold(name) }).last();
+  for (const name of ['Haul manifest', 'In your cargo hold', 'Restock shortlist', 'Planetary Interaction']) {
+    const open = await part(name).locator('table').count();
+    await fold(name).click(); await page.waitForTimeout(120);
+    ok(name + ' folds to its heading', open === 1 && await part(name).locator('table').count() === 0 && await fold(name).getAttribute('aria-expanded') === 'false');
+  }
+  ok('a folded shortlist still says what is waiting', /\d+ lines?/.test(await part('Restock shortlist').locator('.block-head').innerText()));
+  await page.locator('.tab', { hasText: 'Hek' }).click(); await page.waitForTimeout(200);
+  ok('the cargo hold stays folded on another hub', await part('In your cargo hold').locator('table').count() === 0);
+  await fold('In your cargo hold').click(); await page.waitForTimeout(120);
+  ok('a second press opens it again', await part('In your cargo hold').locator('table').count() === 1 && await fold('In your cargo hold').getAttribute('aria-expanded') === 'true');
   ok('no page errors', errors.length === 0);
   await browser.close(); server.close();
   console.log('all checks passed');

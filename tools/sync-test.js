@@ -2,7 +2,7 @@
 // Runs on the sample data (#demo), which syncs through its own file name and setting.
 //   node tools/sync-test.js
 const assert = require('assert');
-const { serve, playwright, chrome } = require('./serve.js');
+const { serve, playwright, chrome, midweek } = require('./serve.js');
 (async () => {
   const server = await serve(8145);
   const browser = await playwright().chromium.launch({ executablePath: chrome, args: ['--no-sandbox'] });
@@ -35,6 +35,7 @@ const { serve, playwright, chrome } = require('./serve.js');
     page.on('pageerror', e => page.errors.push(e.message));
     await ctx.route('https://api.github.com/**', github);
     await page.route('https://images.evetech.net/**', r => r.abort());
+    await midweek(page);
     await page.goto('http://localhost:8145/#demo', { waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
     return page;

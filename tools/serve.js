@@ -16,3 +16,17 @@ exports.serve = port => new Promise(resolve => {
   });
   server.listen(port, () => resolve(server));
 });
+
+/**
+ * Moves the page's clock forward by whole days so its "today" is a Thursday. The sample data is dated back from "now",
+ * so in the first hours of a Monday the week has no sales yet and the weekly-close checks would have nothing to read.
+ */
+exports.midweek = page => page.addInitScript(days => {
+  const Real = Date, shift = days * 864e5;
+  if (!shift) return;
+  class Shifted extends Real {
+    constructor(...a) { if (a.length) super(...a); else super(Real.now() + shift); }
+    static now() { return Real.now() + shift; }
+  }
+  window.Date = Shifted;
+}, (4 - new Date().getDay() + 7) % 7);

@@ -118,7 +118,7 @@
     orders: [], ordersAt: 0, tx: [], assets: [], books: new Map(), jumps: new Map(),
     queue: [], skills: null, clones: null, planets: [], kills: new Map(), routes: {},
     feeds: {}, ready: false, running: false, notice: null,
-    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, openCalls: new Set(), journal: null, costs: (!demo && E.store.get('eveops.costs')) || null, costDraft: null, costNote: null, notify: Object.assign({ change: false, extractors: false, launchpad: false }, E.store.get('eveops.notify')), notifyAllowed: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
+    pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, openCalls: new Set(), journal: null, costs: (!demo && E.store.get('eveops.costs')) || null, costDraft: null, costNote: null, notify: Object.assign({ change: false, extractors: false, launchpad: false }, E.store.get('eveops.notify')), notifyAllowed: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), fold: (!demo && E.store.get('eveops.fold')) || {}, tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
     prices: new Map(), tab: null, follow: true, view: !location.hash && window.Ex && window.Ex.campOpen() ? 'ex' : viewOf(location.hash), hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
   };
@@ -181,7 +181,7 @@
     const m = new Map();
     for (const t of S.tx) {
       if (t.is_buy || now - Date.parse(t.date) > 7 * D || !hubOf.has(t.location_id)) continue;
-      if (C.excludeTypes.indexOf(t.type_id) >= 0 || C.zeroCostTypes.indexOf(t.type_id) >= 0) continue;
+      if (C.excludeTypes.indexOf(t.type_id) >= 0 || C.zeroCostTypes.indexOf(t.type_id) >= 0 || C.planetTypes.indexOf(t.type_id) >= 0) continue;
       const k = t.location_id + ':' + t.type_id;
       if (!open.has(k)) m.set(k, (m.get(k) || 0) + t.quantity);
     }
@@ -479,7 +479,7 @@
     const zero = new Set(C.zeroCostTypes);
     // The wallet's own purchases come first; the tracker's costs fill in for units the wallet cannot account for (config: costs.prefer).
     const track = S.costs && S.costs.rows && S.costs.rows.length ? L.costLookup(S.costs.rows) : null;
-    const led = L.ledger(S.tx, { netMult: NET, exclude: new Set(C.excludeTypes), zeroCost: zero, fallback: track, prefer: C.costs.prefer });
+    const led = L.ledger(S.tx, { netMult: NET, exclude: new Set(C.excludeTypes), zeroCost: zero, made: new Set(C.planetTypes), fallback: track, prefer: C.costs.prefer });
     const vel = L.velocity(led.sales, now);
     const myIds = new Set(S.orders.map(o => o.order_id));
     const windowDays = led.from ? (now - led.from) / D : 0;
@@ -885,8 +885,8 @@
         const we = L.weekAfter(ws), key = L.weekKey(ws), closed = we <= now;
         let rec = W.w[key] || {};
         // fixed once closed; worked out again only when newer tracker costs arrive and EVE's history still holds the whole week
-        if (!rec.frozenAt || ((rec.basis || 0) < basis && led.from != null && led.from <= ws)) {
-          const sm = L.summarize(led.sales, ws, we), fig = { gross: sm.gross, units: sm.units, net: sm.net, uncovered: sm.uncovered, borrowed: sm.borrowed, basis };
+        if (!rec.frozenAt || (((rec.basis || 0) < basis || (rec.rules || 1) < C.ledgerRules) && led.from != null && led.from <= ws)) {
+          const sm = L.summarize(led.sales, ws, we), fig = { gross: sm.gross, units: sm.units, net: sm.net, uncovered: sm.uncovered, borrowed: sm.borrowed, basis, rules: C.ledgerRules, gaps: L.uncosted(led.sales, ws, we).slice(0, 6).map(g => [g.type, g.units]) };
           if (closed && txAt >= we) { rec = W.w[key] = Object.assign({}, rec, fig, { frozenAt: now }); changed = true; }
           else rec = Object.assign({}, rec, fig);
         }
@@ -895,7 +895,7 @@
         if (exact && closed && rec.frozenAt && rec.close == null && exact.close != null) { Object.assign(W.w[key], exact); rec = W.w[key]; changed = true; }
         const src = rec.close != null ? rec : exact || {};
         rows.push({
-          key, start: ws, end: we, closed, gross: rec.gross, units: rec.units, net: rec.net, uncovered: rec.uncovered || 0, borrowed: rec.borrowed || 0, stale: !!rec.frozenAt && (rec.basis || 0) < basis,
+          key, start: ws, end: we, closed, gross: rec.gross, units: rec.units, net: rec.net, uncovered: rec.uncovered || 0, gaps: rec.gaps || [], borrowed: rec.borrowed || 0, stale: !!rec.frozenAt && (rec.basis || 0) < basis,
           fees: src.fees != null ? src.fees : null, change: src.change != null ? src.change : null,
           close: closed ? (src.close != null ? src.close : rec.wallet != null ? rec.wallet : null) : S.wallet, closeSeen: closed && src.close == null && rec.wallet != null ? rec.seenAt : null,
           escrow: closed ? (rec.escrow != null ? rec.escrow : null) : escrow, escrowSeen: closed ? rec.seenAt || null : null,
@@ -1222,33 +1222,44 @@
     }));
   }
 
+  /**
+   * A section's heading as a button that folds the section down to its heading line and opens it again.
+   * The choice is kept on this device. `tag` is the heading level the section already uses.
+   */
+  const folded = key => !!S.fold[key];
+  function foldHead(tag, key, title) {
+    const shut = folded(key);
+    return h(tag, null, h('button', { type: 'button', class: 'fold', 'aria-expanded': shut ? 'false' : 'true', title: (shut ? 'Show ' : 'Hide ') + title,
+      onclick: () => { if (shut) delete S.fold[key]; else S.fold[key] = true; if (!demo) E.store.set('eveops.fold', S.fold); paint(); } }, h('i', { class: 'fold-mark', 'aria-hidden': 'true' }), title));
+  }
+
   function haulView(m) {
     const hl = m.haul, over = hl.m3 > hl.cargo;
-    return h('div', { class: 'block' },
-      h('div', { class: 'block-head' }, h('h3', null, 'Haul manifest'),
+    return h('div', { class: 'block' + (folded('haul') ? ' is-folded' : '') },
+      h('div', { class: 'block-head' }, foldHead('h3', 'haul', 'Haul manifest'),
         h('span', { class: over ? 'neg' : '' }, plural(hl.units, 'unit') + ', ' + num(Math.round(hl.m3)) + ' m³ of '),
         h('label', { class: 'cargo' }, h('input', { type: 'number', min: 0, step: 1, value: hl.cargo, 'aria-label': 'Cargo hold in cubic metres',
           onchange: e => { S.cargo = Math.max(0, Number(e.target.value) || 0); if (!demo) E.store.set('eveops.cargo', S.cargo); paint(); } }), ' m³ cargo'),
         over && h('span', { class: 'chip chip-check' }, 'Over by ' + num(Math.round(hl.m3 - hl.cargo)) + ' m³')),
-      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+      folded('haul') ? null : h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
         h('thead', null, h('tr', null, h('th', { class: 'l' }, 'In the Jita hangar'), h('th', null, 'Units'), h('th', null, 'm³'), hl.rows[0].asks.map(a => h('th', null, a.name)), h('th', null, 'Take to'))),
         h('tbody', null, hl.rows.map(r => h('tr', null,
           h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), r.name)),
           h('td', null, num(r.qty)), h('td', null, num(Math.round(r.m3))),
           r.asks.map(a => h('td', { class: a.name === r.best ? 'best' : '' }, a.ask == null ? '' : L.isk(a.ask), a.sold ? h('span', { class: 'sub' }, 'you sold ' + num(a.sold) + ' this week') : null)),
           h('td', { class: 'best' }, r.best || '')))))),
-      h('p', { class: 'note' }, 'Hub columns are the lowest ask there now. "Take to" prefers a hub where you sold this item in the last 7 days, then the highest ask.'));
+      folded('haul') ? null : h('p', { class: 'note' }, 'Hub columns are the lowest ask there now. "Take to" prefers a hub where you sold this item in the last 7 days, then the highest ask.'));
   }
   /** What is in the ship's cargo hold, where each item sells, and the price to list it at in the hub this panel is for. */
   function holdView(m, s) {
     const hd = m.hold, away = C.hubs.filter(hb => hb.station !== C.jita.station);
     const here = hd.rows.filter(r => r.best === s.short).length;
-    return h('div', { class: 'block', id: 'hold' },
-      h('div', { class: 'block-head' }, h('h3', null, 'In your cargo hold'),
+    return h('div', { class: 'block' + (folded('hold') ? ' is-folded' : ''), id: 'hold' },
+      h('div', { class: 'block-head' }, foldHead('h3', 'hold', 'In your cargo hold'),
         h('span', null, plural(hd.units, 'unit') + ', ' + num(Math.round(hd.m3)) + ' m\u00b3' + (hd.ship ? ' in the ' + hd.ship : '')),
         here ? h('span', { class: 'chip chip-lead' }, plural(here, 'item') + ' to list here') : null,
         h('span', { class: 'why' }, 'as EVE last reported it, ', live('ago', hd.at))),
-      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+      folded('hold') ? null : h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
         h('thead', null, h('tr', null, h('th', { class: 'l' }, 'In the hold'), h('th', null, 'Units'), h('th', null, 'm\u00b3'),
           away.map(hb => h('th', null, hb.name)), h('th', null, 'Take to'), h('th', null, 'Net each'), h('th', null, 'List at ' + s.short))),
         h('tbody', null, hd.rows.map(r => {
@@ -1261,16 +1272,18 @@
             h('td', null, at.net == null ? '' : [h('span', { class: at.net < 0 ? 'neg' : '' }, L.short(at.net)), at.margin != null ? h('span', { class: 'sub' }, Math.round(at.margin * 100) + '%') : null]),
             h('td', null, at.price == null ? h('span', { class: 'sub' }, at.why) : [priceMark('g' + r.type + ':' + s.id, at.price, at.copied, !best || at.soft), h('span', { class: 'sub' }, at.why)]));
         })))),
-      h('p', { class: 'note' }, 'Items you have bought or sold on the market that are in the ship you are flying. The price follows the same rules as the Call column: your order for that item in ' + s.short + ' if you have one, else one legal step under the lowest ask, and none where that would sell under cost or under Jita. A dashed price is your call, or an item that sells better at the "Take to" hub. EVE reports hangars and cargo once an hour, so a load you have just taken on can take that long to appear.'));
+      folded('hold') ? null : h('p', { class: 'note' }, 'Items you have bought or sold on the market that are in the ship you are flying. The price follows the same rules as the Call column: your order for that item in ' + s.short + ' if you have one, else one legal step under the lowest ask, and none where that would sell under cost or under Jita. A dashed price is your call, or an item that sells better at the "Take to" hub. EVE reports hangars and cargo once an hour, so a load you have just taken on can take that long to appear.'));
   }
   function restockView(m) {
     const offered = m.restock.filter(r => r.bid != null && r.want && !r.thin);
     const newest = offered.filter(r => r.copied && !r.copied.moved).reduce((a, r) => (!a || r.copied.at > a.copied.at ? r : a), null);
     if (newest) newest.copied.last = true;
-    return h('div', { class: 'block' },
-      h('div', { class: 'block-head' }, h('h3', null, 'Restock shortlist'), h('span', { class: 'why' }, C.restock.days + ' days of stock or less, selling at least ' + C.restock.minWeek + ' a week'),
+    const want = offered.filter(r => !(r.copied && !r.copied.moved)).length;
+    return h('div', { class: 'block' + (folded('restock') ? ' is-folded' : '') },
+      h('div', { class: 'block-head' }, foldHead('h3', 'restock', 'Restock shortlist'),
+        folded('restock') ? h('span', null, plural(m.restock.length, 'line') + (want ? ', ' + plural(want, 'bid') + ' to place' : '')) : null, h('span', { class: 'why' }, C.restock.days + ' days of stock or less, selling at least ' + C.restock.minWeek + ' a week'),
         offered.some(r => r.copied) ? h('span', null, offered.filter(r => r.copied && !r.copied.moved).length + ' of ' + offered.length + ' bids copied') : null),
-      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+      folded('restock') ? null : h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
         h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Line'), h('th', null, 'Left'), h('th', null, 'Sells a day'), h('th', null, 'Days left'), h('th', null, 'On the way'), h('th', null, 'Units to bid'), h('th', null, 'Net each'), h('th', null, 'Bid to type'))),
         h('tbody', null, m.restock.map(r => h('tr', { class: r.copied && !r.copied.moved && offered.indexOf(r) >= 0 ? 'is-copied' + (r.copied.last ? ' is-last' : '') : '' },
           h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), h('span', null, r.name, h('span', { class: 'sub' }, r.hub)))),
@@ -1280,7 +1293,7 @@
           h('td', null, r.thin ? h('span', { class: 'sub' }, 'margin too thin') : r.want ? num(r.want) : h('span', { class: 'sub' }, 'covered')),
           h('td', null, r.net == null ? '' : [h('span', { class: r.thin ? 'neg' : '' }, L.short(r.net)), h('span', { class: 'sub' }, Math.round(r.margin * 100) + '%')]),
           h('td', null, offered.indexOf(r) >= 0 ? priceMark('r' + r.type, r.bid, r.copied, false) : '')))))),
-      h('p', { class: 'note' }, 'Units to bid is a week of your sales less what is left, already on bid, or waiting in the Jita hangar. The bid is one legal tick over the top Jita bid; net each is at the hub price after fees.'));
+      folded('restock') ? null : h('p', { class: 'note' }, 'Units to bid is a week of your sales less what is left, already on bid, or waiting in the Jita hangar. The bid is one legal tick over the top Jita bid; net each is at the hub price after fees.'));
   }
   function feedPanel(m) {
     const mark = () => { S.seen = { at: Date.now(), orders: m.snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); syncSoon(); paint(); };
@@ -1354,14 +1367,15 @@
     const verdict = { full: 'launchpad nearly full', worth: 'worth a stop', wait: 'not yet' }[p.go];
     const when = p.go !== 'wait' ? '' : p.reach > 0 ? 'Reaches ' + L.short(C.pi.worth) + (p.reach === 1 ? ' tomorrow. ' : ' in ' + p.reach + ' days. ') : 'Will not reach ' + L.short(C.pi.worth) + ' within a week at this pace. ';
     const where = p.near && isFinite(p.near.jumps) ? p.system + ' is ' + plural(p.near.jumps, 'jump') + ' from ' + p.near.name + (p.from != null ? ' and ' + plural(p.from, 'jump') + ' from you. ' : '. ') : '';
-    return h('section', { class: 'pi', id: 'pi' },
+    const shut = folded('pi');
+    return h('section', { class: 'pi' + (shut ? ' is-folded' : ''), id: 'pi' },
       h('header', { class: 'pi-head' },
-        h('h2', null, 'Planetary Interaction'),
+        foldHead('h2', 'pi', 'Planetary Interaction'),
         h('span', { class: 'chip ' + (p.go === 'wait' ? 'chip-hold' : 'chip-lead') }, 'Pickup: ' + verdict),
         h('span', { class: 'stop-sum' }, 'About ' + L.short(p.value) + ' waiting')),
-      h('p', { class: 'pi-note' }, plural(Math.round(p.units), 'unit') + ', ' + num(Math.round(p.m3)) + ' m\u00b3, growing about ' + L.short(p.perDay) + ' a day. ' + when + where
+      shut ? null : h('p', { class: 'pi-note' }, plural(Math.round(p.units), 'unit') + ', ' + num(Math.round(p.m3)) + ' m\u00b3, growing about ' + L.short(p.perDay) + ' a day. ' + when + where
         + (p.stopped ? plural(p.stopped, 'colony has', 'colonies have') + ' stopped extractors.' : '')),
-      h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
+      shut ? null : h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
         h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Product'), h('th', null, 'On planet'), h('th', null, 'A day'), h('th', null, 'Listed'),
           C.hubs.map(hb => h('th', null, hb.name)), h('th', null, 'Value'))),
         h('tbody', null, p.colonies.map(c => h('tr', null,
@@ -1372,7 +1386,7 @@
           h('td', null, c.listedUnits ? num(c.listedUnits) : ''),
           c.asks.map(a => h('td', { class: a != null && a === c.best ? 'best' : '' }, a == null ? '' : L.isk(a))),
           h('td', null, c.value == null ? '' : L.short(c.value))))))),
-      h('p', { class: 'note' }, 'Hub columns are the lowest ask in each station, highest marked. Value uses the ' + p.sellName + ' ask. EVE only reports a colony as it was when last opened in game, so the units are worked out from there: an estimate.'));
+      shut ? null : h('p', { class: 'note' }, 'Hub columns are the lowest ask in each station, highest marked. Value uses the ' + p.sellName + ' ask. EVE only reports a colony as it was when last opened in game, so the units are worked out from there: an estimate.'));
   }
 
   function saveCosts(costs) { S.costs = costs; if (!demo) E.store.set('eveops.costs', S.costs); syncSoon(); paint(); }
@@ -1414,6 +1428,9 @@
       onchange: e => onset(e.target.value), onkeydown: e => { if (e.key === 'Enter') e.target.blur(); } });
     const signed = v => (v > 0 ? '+' : '') + L.short(v);
     const k = c.costs;
+    // which items the units without a cost are, so the tracker rows that would cover them can be found
+    const gapText = r => { const g = r.gaps || [], named = sum(g.slice(0, 3), x => x[1]); return g.length ? g.slice(0, 3).map(x => nameOf(x[0]) + ' ' + num(x[1])).join(', ') + (named < r.uncovered ? ', and ' + num(r.uncovered - named) + ' more' : '') : null; };
+    const gapTitle = r => ((r.gaps || []).length ? r.gaps.map(x => nameOf(x[0]) + ' ' + num(x[1])).join(', ') : null);
     const costBox = S.costDraft == null ? null : h('div', { class: 'costs-in' },
       h('textarea', { class: 'costs-text', rows: 5, spellcheck: 'false', 'data-keep': 'costs-paste', 'aria-label': 'Rows copied from the tracker',
         placeholder: 'In the tracker workbook, open the Order Tracking sheet, select its rows with the header row, copy, and paste here.', oninput: e => { S.costDraft = e.target.value; } }, S.costDraft),
@@ -1450,6 +1467,7 @@
             h('span', { class: 'sub' }, 'page worked out ' + L.short(r.net) + (r.uncovered ? ', ' + plural(r.uncovered, 'unit') + ' without a cost' : '')))
           : h('td', null, L.short(r.net),
             r.uncovered ? h('span', { class: 'sub neg' }, plural(r.uncovered, 'unit') + ' without a cost') : null,
+            r.uncovered && gapText(r) ? h('span', { class: 'sub gaps', title: gapTitle(r) }, gapText(r)) : null,
             r.borrowed ? h('span', { class: 'sub' }, plural(r.borrowed, 'unit') + ' at tracker cost') : null,
             r.stale ? h('span', { class: 'sub' }, 'before the newest costs') : !r.uncovered && !r.borrowed ? h('span', { class: 'sub' }, 'wallet costs') : null),
           h('td', null, r.closed ? box('t' + r.key, r.tracker, 'Tracker net for the week of ' + day(r.start), v => setTracker(r.key, v)) : ''),

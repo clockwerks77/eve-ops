@@ -186,6 +186,7 @@
   function ledger(transactions, opts) {
     const exclude = opts.exclude || new Set();
     const zero = opts.zeroCost || new Set();
+    const made = opts.made || new Set();
     const tx = transactions.filter(t => !exclude.has(t.type_id)).slice()
       .sort((a, b) => Date.parse(a.date) - Date.parse(b.date) || a.transaction_id - b.transaction_id);
     const lots = new Map();
@@ -213,6 +214,8 @@
         if (lot.qty === 0) q.shift();
       }
       if (first != null) need = 0;
+      // made, not bought (a planetary product with no purchase left in the wallet): no cost
+      if (need > 0 && made.has(t.type_id)) { covered += need; need = 0; }
       // units the wallet has no purchase for (bought before EVE's history, or never bought): the tracker's cost, if it has one
       if (need > 0 && opts.fallback) {
         const c = opts.fallback(t.type_id, t.location_id, when);
@@ -252,6 +255,18 @@
       s.uncovered += x.qty - x.covered; s.borrowed += x.borrowed || 0;
     }
     return s;
+  }
+
+  /** The sales between two times that have units without a cost, most units first: [{ type, units, gross }]. */
+  function uncosted(sales, from, to) {
+    const m = new Map();
+    for (const x of sales) {
+      if (x.date < from || x.date >= to || x.qty <= x.covered) continue;
+      const e = m.get(x.type_id) || { type: x.type_id, units: 0, gross: 0 };
+      e.units += x.qty - x.covered; e.gross += (x.qty - x.covered) * x.price;
+      m.set(x.type_id, e);
+    }
+    return Array.from(m.values()).sort((a, b) => b.units - a.units || b.gross - a.gross || a.type - b.type);
   }
 
   function startOfDay(ms) { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); }
@@ -628,8 +643,9 @@
       x = x || {}; y = y || {};
       const out = {};
       const bx = x.basis || 0, by = y.basis || 0;                 // which import of the tracker's costs the figures were worked out with
-      const f = x.frozenAt && y.frozenAt ? (bx !== by ? (bx > by ? x : y) : x.frozenAt < y.frozenAt ? x : y.frozenAt < x.frozenAt ? y : stable(x) >= stable(y) ? x : y) : x.frozenAt ? x : y.frozenAt ? y : null;
-      if (f) for (const k of ['gross', 'units', 'net', 'uncovered', 'borrowed', 'basis', 'frozenAt']) if (f[k] != null) out[k] = f[k];
+      const rx = x.rules || 1, ry = y.rules || 1;                 // and which version of the rules
+      const f = x.frozenAt && y.frozenAt ? (rx !== ry ? (rx > ry ? x : y) : bx !== by ? (bx > by ? x : y) : x.frozenAt < y.frozenAt ? x : y.frozenAt < x.frozenAt ? y : stable(x) >= stable(y) ? x : y) : x.frozenAt ? x : y.frozenAt ? y : null;
+      if (f) for (const k of ['gross', 'units', 'net', 'uncovered', 'borrowed', 'basis', 'rules', 'gaps', 'frozenAt']) if (f[k] != null) out[k] = f[k];
       const exact = w => [w.fees, w.change, w.close];
       const j = x.close != null && y.close != null ? (stable(exact(x)) >= stable(exact(y)) ? x : y) : x.close != null ? x : y.close != null ? y : null;
       if (j) { out.fees = j.fees; out.change = j.change; out.close = j.close; }
@@ -872,7 +888,7 @@
   return {
     tickBelow, tickAbove, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
-    ledger, unitCost, summarize, daily, velocity, startOfDay, startOfWeek,
+    ledger, unitCost, summarize, uncosted, daily, velocity, startOfDay, startOfWeek,
     orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, clock, picketRoll, picketSnooze, campAlerts, nightMarkdown, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
   };

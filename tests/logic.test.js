@@ -675,3 +675,31 @@ test('weekly close: a week set to the tracker\'s figure is left out of the tie-o
   const a = { weeks: { w: { '2026-10-19': { tracker: { v: 121.5e6, at: 5 }, lock: { on: true, at: 9 } } } } }, b = { weeks: { w: { '2026-10-19': { lock: { on: false, at: 7 } } } } };
   assert.deepEqual(L.syncMerge(a, b, 100, { pins: 1e9, copied: 1e9 }).weeks.w['2026-10-19'].lock, { on: true, at: 9 });
 });
+
+test('ledger: a planetary product with no purchase costs nothing, one that was bought keeps its price', () => {
+  const t = (id, date, type, qty, price, isBuy) => ({ transaction_id: id, date, type_id: type, quantity: qty, unit_price: price, is_buy: isBuy, location_id: 60003760 });
+  const tx = [
+    t(1, '2026-11-15T10:00:00Z', 2310, 34096, 1.88, false),   // Noble Gas straight off the colonies
+    t(2, '2026-11-14T10:00:00Z', 2393, 100, 400, true),       // a tier 1 commodity bought on the market
+    t(3, '2026-11-15T11:00:00Z', 2393, 150, 600, false),      // 100 of them bought, 50 made
+    t(4, '2026-11-15T12:00:00Z', 2404, 80, 900000, false),    // a module with no purchase on record
+    t(5, '2026-11-15T13:00:00Z', 33474, 19, 1500000, false),
+  ];
+  const opts = { netMult: 0.95, exclude: new Set(), zeroCost: new Set(), made: new Set([2310, 2393]) };
+  const led = L.ledger(tx, opts), s = L.summarize(led.sales, 0, Infinity);
+  assert.equal(s.uncovered, 99);
+  assert.ok(Math.abs(led.sales[0].net - 34096 * 1.88 * 0.95) < 1e-6);
+  assert.equal(led.sales[1].cost, 100 * 400); assert.equal(led.sales[1].covered, 150);
+  assert.deepEqual(L.uncosted(led.sales, 0, Infinity).map(g => [g.type, g.units]), [[2404, 80], [33474, 19]]);
+  assert.equal(L.summarize(L.ledger(tx, Object.assign({}, opts, { made: null })).sales, 0, Infinity).uncovered, 99 + 34096 + 50);
+});
+
+test('sync: a week worked out under newer rules wins over an older working of it', () => {
+  const old = { weeks: { w: { '2026-11-09': { gross: 10, units: 5, net: 3, uncovered: 4, basis: 50, frozenAt: 100 } } } };
+  const fresh = { weeks: { w: { '2026-11-09': { gross: 10, units: 5, net: 4, uncovered: 1, basis: 0, rules: 2, gaps: [[2404, 1]], frozenAt: 200 } } } };
+  const keep = { pins: 1e9, copied: 1e9 };
+  const ab = L.syncMerge(old, fresh, 300, keep), ba = L.syncMerge(fresh, old, 300, keep);
+  assert.deepEqual(ab, ba);
+  assert.equal(ab.weeks.w['2026-11-09'].net, 4); assert.equal(ab.weeks.w['2026-11-09'].rules, 2);
+  assert.deepEqual(ab.weeks.w['2026-11-09'].gaps, [[2404, 1]]);
+});

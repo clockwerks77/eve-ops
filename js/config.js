@@ -43,6 +43,15 @@ window.EVEOPS_CONFIG = {
   excludeTypes: [44992, 40520, 45635, 40519],
   // Planetary products are sold at zero cost basis.
   zeroCostTypes: [2329, 3693, 9830, 9832, 2312, 3775],
+  // Every planetary resource and commodity in EVE (raw, then tiers 1 to 4). One of these sold with no purchase in the wallet came off
+  // a colony, so it costs nothing; one that was bought on the market keeps the price paid.
+  planetTypes: [2267, 2270, 2272, 2306, 2307, 2268, 2308, 2309, 2310, 2311, 2073, 2286, 2287, 2288, 2305,
+    2389, 2390, 2392, 2393, 2395, 2396, 2397, 2398, 2399, 2400, 2401, 3645, 3683, 3779, 9828,
+    44, 2312, 2317, 2319, 2321, 2327, 2328, 2329, 2463, 3689, 3691, 3693, 3695, 3697, 3725, 3775, 3828, 9830, 9832, 9836, 9838, 9840, 9842, 15317,
+    2344, 2345, 2346, 2348, 2349, 2351, 2352, 2354, 2358, 2360, 2361, 2366, 2367, 9834, 9846, 9848, 12836, 17136, 17392, 17898, 28974,
+    2867, 2868, 2869, 2870, 2871, 2872, 2875, 2876],
+  // Raised when the way a week's net is worked out changes, so finished weeks EVE still has the sales for are worked out again.
+  ledgerRules: 2,
 
   // Restock shortlist: lines with this many days of stock or fewer, that sold at least minWeek units in 7 days. Lines netting under minMargin are listed but not offered a bid.
   restock: { days: 4, minWeek: 5, minMargin: 0.10 },
