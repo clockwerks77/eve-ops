@@ -414,10 +414,12 @@
     const rows = weeks.map(w => {
       if (w.tracker == null || w.net == null) return { diff: null, tied: null };
       const diff = w.net - w.tracker;
+      // a week set to the tracker's figure was adopted, not checked: it neither ties nor counts against the run
+      if (w.locked) return { diff, tied: null, locked: true };
       return { diff, tied: Math.abs(diff) <= Math.abs(w.tracker) * within };
     });
     let run = 0;
-    for (let i = rows.length - 1; i >= 0 && rows[i].tied; i--) run++;
+    for (let i = rows.length - 1; i >= 0 && (rows[i].tied || rows[i].locked); i--) if (rows[i].tied) run++;
     return { rows, run };
   }
 
@@ -636,6 +638,8 @@
       if (sn && sn.at) { out.escrow = sn.escrow; out.wallet = sn.wallet; out.seenAt = sn.at; }
       const t = newer(x.tracker, y.tracker);
       if (t) out.tracker = t;
+      const lk = newer(x.lock, y.lock);
+      if (lk) out.lock = lk;
       return out;
     };
     const wa = a.weeks || {}, wb = b.weeks || {}, w = {};

@@ -658,3 +658,20 @@ test('expedition: a camp night as Markdown (acceptance test 7)', () => {
   assert.ok(md.includes('## Bank')); assert.ok(md.includes('- C3 static: critical, end of life seen 03:30, picketed, not bookmarked both sides'));
   assert.ok(L.nightMarkdown({ camp: {}, night: { n: 1, started_at: t0, ended_at: null }, windows: [], holes: [], name: String, mode: String, type: String, time: hm, day: () => 'Fri' }).includes('No windows were run.'));
 });
+
+test('weekly close: a week set to the tracker\'s figure is left out of the tie-out', () => {
+  const w = (net, tracker, locked) => ({ net, tracker, locked });
+  // oldest first: off but adopted, then two that tie on their own
+  const t = L.tieOut([w(69.2e6, 121.5e6, true), w(300e6, 303e6), w(281e6, 280e6)], 0.02);
+  assert.deepEqual(t.rows.map(r => r.tied), [null, true, true]); assert.equal(t.rows[0].locked, true); assert.equal(Math.round(t.rows[0].diff / 1e5) / 10, -52.3);
+  assert.equal(t.run, 2);
+  // an adopted week between two tied ones does not break the run, and does not add to it
+  assert.equal(L.tieOut([w(300e6, 303e6), w(69.2e6, 121.5e6, true), w(281e6, 280e6)], 0.02).run, 2);
+  // an off week that is not adopted still stops it
+  assert.equal(L.tieOut([w(300e6, 303e6), w(69.2e6, 121.5e6), w(281e6, 280e6)], 0.02).run, 1);
+  // adopted weeks alone are not a tie-out
+  assert.equal(L.tieOut([w(69.2e6, 121.5e6, true), w(260e6, 310e6, true)], 0.02).run, 0);
+  // the choice travels between devices with the newer press winning
+  const a = { weeks: { w: { '2026-10-19': { tracker: { v: 121.5e6, at: 5 }, lock: { on: true, at: 9 } } } } }, b = { weeks: { w: { '2026-10-19': { lock: { on: false, at: 7 } } } } };
+  assert.deepEqual(L.syncMerge(a, b, 100, { pins: 1e9, copied: 1e9 }).weeks.w['2026-10-19'].lock, { on: true, at: 9 });
+});

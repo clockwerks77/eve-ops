@@ -73,6 +73,15 @@ const { serve, playwright, chrome } = require('./serve.js');
   ok('the tracker figure for last week ties', /Tied/.test(await rows.nth(1).locator('td').nth(4).innerText()) && /Tied 1 week running/.test(await text('#closes .pi-note')));
   await rows.nth(2).locator('.isk-in').fill('5M'); await rows.nth(2).locator('.isk-in').press('Enter'); await page.waitForTimeout(200);
   ok('a figure that is far off is called out with the gap', /Off/.test(await rows.nth(2).locator('td').nth(4).innerText()) && /Tied 1 week running/.test(await text('#closes .pi-note')));
+  // a week that is off can be set to the tracker's figure: it counts at that figure and is left out of the tie-out
+  const offSum = await text('#closes .stop-sum'), pageNet = (await rows.nth(2).locator('td').nth(2).innerText()).split('\n')[0];
+  await rows.nth(2).locator('.linkish', { hasText: 'Use the tracker' }).click(); await page.waitForTimeout(200);
+  const lockedCell = await rows.nth(2).locator('td').nth(2).innerText();
+  ok('a week that is off can be set to the tracker\'s figure', /^5\.0M/.test(lockedCell) && /the tracker.s figure/.test(lockedCell) && lockedCell.includes('page worked out ' + pageNet) && /Set to tracker/.test(await rows.nth(2).locator('td').nth(4).innerText())
+    && await rows.nth(2).locator('.neg').count() === 0, lockedCell);
+  ok('"to date" then counts the tracker\'s figure, and the tie-out neither gains nor loses by it', offSum !== await text('#closes .stop-sum') && /Tied 1 week running/.test(await text('#closes .pi-note')));
+  await rows.nth(2).locator('.linkish', { hasText: 'Undo' }).click(); await page.waitForTimeout(200);
+  ok('Undo puts the page\'s own figure back', (await rows.nth(2).locator('td').nth(2).innerText()).split('\n')[0] === pageNet && /Off/.test(await rows.nth(2).locator('td').nth(4).innerText()) && offSum === await text('#closes .stop-sum'));
   await rows.nth(2).locator('.isk-in').fill((await rows.nth(2).locator('td').nth(2).innerText()).split('\n')[0]); await rows.nth(2).locator('.isk-in').press('Enter'); await page.waitForTimeout(200);
   ok('two tied weeks in a row: the page can take over', /Tied out/.test(await text('#closes .pi-head')) && /take over as the ledger/.test(await text('#closes .pi-note')));
   const before = await text('#closes .stop-sum');

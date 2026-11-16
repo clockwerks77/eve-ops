@@ -900,13 +900,15 @@
           close: closed ? (src.close != null ? src.close : rec.wallet != null ? rec.wallet : null) : S.wallet, closeSeen: closed && src.close == null && rec.wallet != null ? rec.seenAt : null,
           escrow: closed ? (rec.escrow != null ? rec.escrow : null) : escrow, escrowSeen: closed ? rec.seenAt || null : null,
           tracker: rec.tracker && rec.tracker.v != null ? rec.tracker.v : null,
+          // set to the tracker's figure: a finished week whose sales the page cannot cost counts at what the ledger recorded
+          locked: closed && !!(rec.lock && rec.lock.on) && !!rec.tracker && rec.tracker.v != null,
         });
       }
       if (changed) saveWeeks(true);
       const done = rows.filter(r => r.closed), tie = L.tieOut(done, C.tieOut.within);
       done.forEach((r, i) => { r.diff = tie.rows[i].diff; r.tied = tie.rows[i].tied; });
       const carried = W.carried && W.carried.v != null ? W.carried.v : null;
-      return { rows: rows.slice().reverse(), since: rows.length ? rows[0].start : cur, carried, toDate: (carried || 0) + sum(rows, r => r.net || 0), run: tie.run, need: C.tieOut.weeks, journal: !!S.journal,
+      return { rows: rows.slice().reverse(), since: rows.length ? rows[0].start : cur, carried, toDate: (carried || 0) + sum(rows, r => (r.locked ? r.tracker : r.net) || 0), run: tie.run, need: C.tieOut.weeks, journal: !!S.journal,
         costs: S.costs && S.costs.rows && S.costs.rows.length ? { at: S.costs.at, lines: S.costs.rows.length, items: new Set(S.costs.rows.map(r => r.t)).size, net: S.costs.net, unknown: S.costs.unknown || [] } : null };
     })();
 
@@ -1406,6 +1408,7 @@
     const typed = (text, apply) => { const t = String(text).trim(), v = t === '' ? null : L.parseIsk(t); if (t !== '' && v == null) return paint(); apply(v); saveWeeks(); };
     const setTracker = (key, text) => typed(text, v => { const w = S.weeks.w[key] || (S.weeks.w[key] = {}); w.tracker = { v, at: Date.now() }; });
     const setCarried = text => typed(text, v => { S.weeks.carried = { v, at: Date.now() }; });
+    const setLock = (key, on) => { const w = S.weeks.w[key] || (S.weeks.w[key] = {}); w.lock = { on, at: Date.now() }; saveWeeks(); };
     const day = ms => new Date(ms).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
     const box = (keep, value, label, onset) => h('input', { class: 'isk-in', type: 'text', inputmode: 'decimal', 'data-keep': keep, 'aria-label': label, placeholder: keep === 'carried' ? 'e.g. 1.25B' : '', value: value == null ? '' : L.isk(Math.round(value)),
       onchange: e => onset(e.target.value), onkeydown: e => { if (e.key === 'Enter') e.target.blur(); } });
@@ -1443,18 +1446,23 @@
         h('tbody', null, c.rows.slice(0, 8).map(r => h('tr', { class: r.closed ? '' : 'is-open' },
           h('td', { class: 'l' }, day(r.start) + ' to ' + day(r.end - D), h('span', { class: 'sub' }, r.closed ? 'closed' : 'this week so far')),
           h('td', null, L.short(r.gross), h('span', { class: 'sub' }, plural(r.units, 'unit'))),
-          h('td', null, L.short(r.net),
+          r.locked ? h('td', null, L.short(r.tracker), h('span', { class: 'sub' }, 'the tracker\u2019s figure'),
+            h('span', { class: 'sub' }, 'page worked out ' + L.short(r.net) + (r.uncovered ? ', ' + plural(r.uncovered, 'unit') + ' without a cost' : '')))
+          : h('td', null, L.short(r.net),
             r.uncovered ? h('span', { class: 'sub neg' }, plural(r.uncovered, 'unit') + ' without a cost') : null,
             r.borrowed ? h('span', { class: 'sub' }, plural(r.borrowed, 'unit') + ' at tracker cost') : null,
             r.stale ? h('span', { class: 'sub' }, 'before the newest costs') : !r.uncovered && !r.borrowed ? h('span', { class: 'sub' }, 'wallet costs') : null),
           h('td', null, r.closed ? box('t' + r.key, r.tracker, 'Tracker net for the week of ' + day(r.start), v => setTracker(r.key, v)) : ''),
-          h('td', { class: r.tied == null ? '' : r.tied ? 'best' : 'neg' }, r.tied == null ? '' : [r.tied ? 'Tied' : 'Off', h('span', { class: 'sub' }, signed(r.diff))]),
+          r.locked ? h('td', null, 'Set to tracker', h('button', { type: 'button', class: 'linkish', onclick: () => setLock(r.key, false) }, 'Undo'))
+          : h('td', { class: r.tied == null ? '' : r.tied ? 'best' : 'neg' }, r.tied == null ? '' : [r.tied ? 'Tied' : 'Off', h('span', { class: 'sub' }, signed(r.diff)),
+            r.tied ? null : h('button', { type: 'button', class: 'linkish', onclick: () => setLock(r.key, true) }, 'Use the tracker\u2019s figure')]),
           h('td', null, r.fees == null ? '' : L.short(r.fees)),
           h('td', null, r.change == null ? '' : signed(r.change)),
           h('td', null, r.close == null ? '' : L.isk(Math.round(r.close)), r.closeSeen ? h('span', { class: 'sub' }, 'as seen ' + clock(r.closeSeen)) : r.closed ? null : h('span', { class: 'sub' }, 'now')),
           h('td', null, r.escrow == null ? '' : L.short(r.escrow), r.escrowSeen ? h('span', { class: 'sub' }, 'as seen ' + clock(r.escrowSeen)) : r.closed ? null : h('span', { class: 'sub' }, 'now'))))))),
       h('p', { class: 'note' }, 'Weeks run Monday to Sunday on this device\u2019s clock. Sold and net come from your sales. Cost is what the wallet shows you paid, first in, first out; units the wallet has no purchase for take the tracker\u2019s unit cost for that item (its row at the same hub, listed most recently before the sale). A closed week is fixed, and worked out again only when newer tracker rows are pasted while EVE still has that week\u2019s sales. '
-        + 'Fees, wallet change and wallet at close are exact, from the wallet journal, which EVE keeps for 30 days. In buy orders is as this page last saw it that week.'));
+        + 'Fees, wallet change and wallet at close are exact, from the wallet journal, which EVE keeps for 30 days. In buy orders is as this page last saw it that week. '
+        + 'A finished week that is off can be set to the tracker\u2019s figure: it then counts at that figure in "to date" and is left out of the tie-out, because it was adopted and not checked.'));
   }
 
   function pin(rows) {

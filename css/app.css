@@ -281,6 +281,7 @@ button { font: inherit; color: inherit; }
 .closes-carry .sub { display: inline; margin-left: 0.6rem; }
 .closes-table tr.is-open td { color: var(--dim); }
 .closes-table .neg { color: var(--bad); font-weight: 600; }
+.closes-table .linkish { display: block; margin-left: auto; padding-top: 0.1rem; font-size: 0.86rem; font-weight: 500; }
 .pi-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 .pi-table th { font-weight: 400; color: var(--dim); font-size: 0.82rem; text-align: right; padding: 0 0 0.25rem 1rem; white-space: nowrap; }
 .pi-table td { text-align: right; padding: 0.3rem 0 0.3rem 1rem; border-top: 1px solid var(--seam); white-space: nowrap; vertical-align: middle; }
