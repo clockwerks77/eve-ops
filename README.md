@@ -81,7 +81,7 @@ Planning and running the four-pilot wormhole camp. Built so far: Muster, Kit & S
 - **Session log:** every window by night, with its note, and one Markdown summary per night to copy into a notes vault.
 - **Ending a camp** is by hand until the strike checklist exists. Its log stays under Earlier camps.
 
-The timers ring only from the Android app (build 1.0.11 or newer): the page hands the app the list of what to ring for, and the app sets one Android alarm per ring, so they sound with the app shut or the phone folded, and are set again after the phone restarts. They play on the alarm volume, so they are heard with the phone on silent; Android's notification settings for the app list them as "Camp timers". Confirm and Snooze on a notification work without opening the app. In an ordinary browser the board only counts down while it is open, and says so.
+The timers ring only from the Android app (build 1.0.12 or newer): the page hands the app the list of what to ring for, and the app sets one Android alarm per ring, so they sound with the app shut or the phone folded, and are set again after the phone restarts. They play on the alarm volume, so they are heard with the phone on silent; Android's notification settings for the app list them as "Camp timers". Confirm and Snooze on a notification work without opening the app. In an ordinary browser the board only counts down while it is open, and says so.
 
 The page also keeps a copy of itself on the device (`sw.js`), so it opens with no network. Trading and Wormholes still need EVE's servers for their numbers; the Expedition tab does not.
 
