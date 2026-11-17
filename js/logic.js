@@ -349,6 +349,15 @@
   }
 
   /**
+   * The most an ask can be counted at: `spike` times the month's traded average in the hub's region. A listing over it is a thin
+   * spike, not a price. Null with fewer than `minDays` traded days in the month, which is too little to call anything a spike.
+   */
+  function spikeCap(history, now, spike, minDays) {
+    const m = (history || []).filter(r => Date.parse(r.date) >= now - 31 * 864e5 && r.volume > 0), vm = sum(m, r => r.volume);
+    return m.length >= (minDays || 10) && vm ? (spike || 1.15) * sum(m, r => r.average * r.volume) / vm : null;
+  }
+
+  /**
    * Where a line goes, and the most a bid on it may be.
    * hubs: [{ name, station, price (what the hub is counted as paying), perDay (the pace it is weighted by) }]
    * o: { cost (unit cost, or the bid), buyFee (the broker's share on a bid still to fill, else 0), netMult, floor, margin, top }
@@ -1030,7 +1039,7 @@
   return {
     tickBelow, tickAbove, tickFloor, tickCeil, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
-    hubRead, destPlan, splitUnits, guardBid, lineStatus, orderChanges, exposure,
+    hubRead, spikeCap, destPlan, splitUnits, guardBid, lineStatus, orderChanges, exposure,
     ledger, unitCost, summarize, uncosted, daily, velocity, startOfDay, startOfWeek,
     orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, clock, picketRoll, picketSnooze, campAlerts, nightMarkdown, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,

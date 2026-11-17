@@ -717,6 +717,20 @@ test('legal prices at or beside a figure', () => {
   assert.equal(L.tickCeil(8099.1), 8100);
 });
 
+test('the front of a book counts for no more than 115% of the month\'s average, given a month to go on', () => {
+  const now = Date.parse('2026-11-17T17:00:00Z');
+  // Dodixie, Small Hyperspatial Velocity Optimizer II: asking 3,979,000 against a month at 3,283,000
+  const cap = L.spikeCap(histRows(now, 30, 3283000, 39), now, 1.15);
+  assert.ok(Math.abs(cap - 3775450) < 1);
+  assert.ok(cap < 3979000);
+  // eight traded days are not a month: nothing is called a spike
+  assert.equal(L.spikeCap(histRows(now, 8, 1540000, 20), now, 1.15), null);
+  assert.equal(L.spikeCap([], now, 1.15), null);
+  assert.equal(L.spikeCap(null, now, 1.15), null);
+  // days with nothing traded do not count towards the month
+  assert.equal(L.spikeCap(histRows(now, 30, 1000, d => (d <= 9 ? 5 : 0)), now, 1.15), null);
+});
+
 test('a hub is counted at the lowest of its ask and its history, so a thin spike does not count', () => {
   const now = Date.parse('2026-11-17T17:00:00Z');
   // a steady hub: the ask is the lowest mark
