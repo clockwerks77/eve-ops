@@ -703,3 +703,181 @@ test('sync: a week worked out under newer rules wins over an older working of it
   assert.equal(ab.weeks.w['2026-11-09'].net, 4); assert.equal(ab.weeks.w['2026-11-09'].rules, 2);
   assert.deepEqual(ab.weeks.w['2026-11-09'].gaps, [[2404, 1]]);
 });
+
+// ------------------------------------------------------------------ safeguards (version 25)
+const NETM = 1 - 0.015 - 0.03375;
+const histRows = (now, days, avg, vol) => Array.from({ length: days }, (_, i) => ({ date: new Date(now - (days - i) * 864e5).toISOString().slice(0, 10), average: typeof avg === 'function' ? avg(days - i) : avg, volume: typeof vol === 'function' ? vol(days - i) : vol }));
+
+test('legal prices at or beside a figure', () => {
+  assert.equal(L.tickFloor(857312.7), 857300);
+  assert.equal(L.tickFloor(857300), 857300);
+  assert.equal(L.tickCeil(1305420.2), 1306000);
+  assert.equal(L.tickCeil(1306000), 1306000);
+  assert.equal(L.tickFloor(7882.4), 7882);
+  assert.equal(L.tickCeil(8099.1), 8100);
+});
+
+test('a hub is counted at the lowest of its ask and its history, so a thin spike does not count', () => {
+  const now = Date.parse('2026-11-17T17:00:00Z');
+  // a steady hub: the ask is the lowest mark
+  const steady = L.hubRead(1117000, histRows(now, 30, 1150000, 140), now, 1.15);
+  assert.equal(steady.price, 1117000);
+  assert.equal(steady.thin, false);
+  assert.equal(Math.round(steady.perDay), 140);
+  // a lone listing far above what the item trades at: counted at the trade, and marked
+  const spike = L.hubRead(2900000, histRows(now, 30, 1220000, 27), now, 1.15);
+  assert.equal(spike.price, 1220000);
+  assert.equal(spike.thin, true);
+  // the week jumped but the month did not: held to 115% of the month
+  const jump = L.hubRead(2744000, histRows(now, 30, d => (d <= 7 ? 2700000 : 1600000), 100), now, 1.15);
+  assert.ok(jump.price < 2744000 && jump.price > 1600000 * 1.15 && jump.price < 2300000, String(jump.price));
+  // a week busier than the month is paced by the month
+  const burst = L.hubRead(1000, histRows(now, 30, 1000, d => (d <= 7 ? 170 : 40)), now, 1.15);
+  assert.ok(burst.perDay < 80 && burst.perDay > 60, String(burst.perDay));
+  // nothing listed and nothing traded: no opinion
+  assert.equal(L.hubRead(null, [], now, 1.15).price, null);
+  // nobody selling now, but it trades: the history stands in
+  assert.equal(L.hubRead(null, histRows(now, 30, 500000, 10), now, 1.15).price, 500000);
+});
+
+test('where a line goes, and the most a bid on it may be', () => {
+  const hubs = [
+    { name: 'Amarr', station: 1, price: 1117000, perDay: 142 },
+    { name: 'Rens', station: 2, price: 1098000, perDay: 96 },
+    { name: 'Dodixie', station: 3, price: 1171729, perDay: 63 },
+    { name: 'Hek', station: 4, price: 905000, perDay: 400 },      // busy, but under the floor at this bid
+  ];
+  const o = { cost: 838000, buyFee: 0.015, netMult: NETM, floor: 0.10, margin: 0.15, top: 3 };
+  const g = L.destPlan(hubs, o);
+  assert.equal(g.state, 'ok');
+  assert.deepEqual(g.hubs.map(x => x.name), ['Amarr', 'Rens', 'Dodixie']);          // best pace of profit first; Hek is left out
+  assert.ok(Math.abs(g.hubs.reduce((a, x) => a + x.share, 0) - 1) < 1e-9);
+  assert.ok(L.isLegal(g.max) && Math.abs(g.max - 914700) <= 200, String(g.max));     // the roster's figure for Warp Disruptor II on 2026-11-17 was 914,700
+  assert.ok(g.margin > 0.25 && g.margin < 0.27);
+  // the same bid placed higher: still fine up to the max, not past it
+  assert.equal(L.destPlan(hubs, Object.assign({}, o, { cost: 914700 })).state, 'ok');
+  // hub prices fall away: no hub nets the floor
+  const fell = L.destPlan(hubs.map(x => Object.assign({}, x, { price: 900000 })), o);
+  assert.equal(fell.state, 'under');
+  assert.ok(fell.max < 838000 && fell.margin < 0.10);
+  // nothing to read
+  assert.equal(L.destPlan([], o).state, 'unknown');
+  assert.equal(L.destPlan([{ name: 'Hek', price: null, perDay: 9 }], o).state, 'unknown');
+  // stock already paid for carries no broker fee on the way in; with no pace known the shares are equal
+  const paid = L.destPlan([{ name: 'Hek', price: 1000000, perDay: 0 }, { name: 'Rens', price: 1100000, perDay: 0 }], { cost: 800000, buyFee: 0, netMult: NETM, floor: 0.10, margin: 0.15, top: 3 });
+  assert.deepEqual(paid.hubs.map(x => x.share), [0.5, 0.5]);
+});
+
+test('units shared out between hubs add up exactly', () => {
+  const s = L.splitUnits(210, [{ name: 'Amarr', share: 142 / 301 }, { name: 'Rens', share: 96 / 301 }, { name: 'Dodixie', share: 63 / 301 }]);
+  assert.deepEqual(s, [{ name: 'Amarr', units: 99 }, { name: 'Rens', units: 67 }, { name: 'Dodixie', units: 44 }]);
+  assert.equal(L.splitUnits(5, [{ name: 'A', share: 0.98 }, { name: 'B', share: 0.02 }]).reduce((a, x) => a + x.units, 0), 5);
+  assert.deepEqual(L.splitUnits(1, [{ name: 'A', share: 0.5 }, { name: 'B', share: 0.5 }]).length, 1);
+  assert.deepEqual(L.splitUnits(10, []), []);
+});
+
+test('a bid is held at its max, and pulled when it no longer pays', () => {
+  const ctx = { broker: 0.015, modify: 0.0039, bigMove: 0.02 };
+  const pos = { status: 'outbid', price: 3304000, remain: 29, wall: 3601000, ahead: 82, over: [] };
+  const bump = L.planBid(pos, ctx);
+  assert.equal(bump.target, 3602000);
+  // the top bid has gone past what the line supports: leave it
+  const over = L.guardBid(bump, pos, { state: 'ok', max: 3485000, margin: 0.21 });
+  assert.equal(over.action, 'hold'); assert.equal(over.kind, 'over'); assert.equal(over.target, null);
+  assert.match(over.reason, /3,601,000.*over your max bid of 3,485,000/);
+  // within the max: the bump stands as it was
+  assert.equal(L.guardBid(bump, pos, { state: 'ok', max: 3700000, margin: 0.21 }), bump);
+  // hub prices fell under the floor: pull, even while leading
+  const lead = { status: 'leading', price: 945900, remain: 159, wall: 945800, ahead: 0, over: [] };
+  const pull = L.guardBid(L.planBid(lead, ctx), lead, { state: 'under', max: 859700, margin: 0.04 });
+  assert.equal(pull.kind, 'pull'); assert.match(pull.reason, /Nets 4%.*859,700.*Cancel it or lower it/);
+  assert.match(L.guardBid(L.planBid(lead, ctx), lead, { state: 'under', max: 700000, margin: -0.03 }).reason, /^Loses 3%/);
+  // no read of the hubs: no opinion
+  assert.equal(L.guardBid(bump, pos, { state: 'unknown' }), bump);
+  assert.equal(L.guardBid(bump, pos, null), bump);
+});
+
+test('checks: a bid left far behind, and a price that is not the one copied', () => {
+  const bid = { isBuy: true, price: 959700, duration: 90, known: true, wall: 1306000, behind: 0.15 };
+  assert.match(L.orderChecks(bid)[0], /27% under the top bid, so it will not fill/);
+  // the same gap is the plan when the top bid is past the line's max
+  assert.deepEqual(L.orderChecks(Object.assign({}, bid, { max: 1250000 })), []);
+  assert.match(L.orderChecks(Object.assign({}, bid, { max: 1343000 }))[0], /under the top bid/);
+  // an ordinary outbid is not a check
+  assert.deepEqual(L.orderChecks(Object.assign({}, bid, { price: 1295000 })), []);
+  // without the rule switched on, nothing changes for older callers
+  assert.deepEqual(L.orderChecks({ isBuy: true, price: 959700, duration: 90, known: true, wall: 1306000 }), []);
+  // copied 1,307,000, typed 959,700
+  assert.match(L.orderChecks(Object.assign({}, bid, { max: 1250000, copied: 1307000 }))[0], /You copied 1,307,000 but the order shows 959,700/);
+  assert.deepEqual(L.orderChecks({ isBuy: false, price: 1322000, duration: 90, known: true, front: 1323000, cost: 1000000, netMult: NETM, copied: 1322000 }), []);
+});
+
+test('probation: a line earns a re-bid by selling half of its first lot', () => {
+  const now = Date.parse('2026-12-01T12:00:00Z'), day = 864e5, r = { lotDays: 3, half: 0.5, days: 14, floor: 0.10 };
+  const lot = [{ at: now - 5 * day, qty: 100 }, { at: now - 4 * day, qty: 50 }];           // both within three days: one lot of 150
+  assert.equal(L.lineStatus({ buys: lot, sold: 0, margin: null, stock: 150 }, r, now).state, 'new');
+  assert.deepEqual(L.lineStatus({ buys: lot, sold: 40, margin: 0.2, stock: 110 }, r, now), { state: 'probation', sold: 40, lot: 150, first: now - 5 * day, thin: false });
+  assert.equal(L.lineStatus({ buys: lot, sold: 75, margin: 0.2, stock: 75 }, r, now).state, 'proven');
+  assert.equal(L.lineStatus({ buys: lot, sold: 120, margin: 0.04, stock: 30 }, r, now).state, 'probation');      // selling, but under the floor
+  // a re-buy a week later is not part of the first lot
+  assert.equal(L.lineStatus({ buys: lot.concat([{ at: now - 1 * day, qty: 300 }]), sold: 80, margin: 0.2, stock: 370 }, r, now).state, 'proven');
+  // two weeks on and still short: clear it and drop the line
+  const old = [{ at: now - 15 * day, qty: 150 }];
+  assert.equal(L.lineStatus({ buys: old, sold: 20, margin: 0.2, stock: 130 }, r, now).state, 'drop');
+  assert.equal(L.lineStatus({ buys: old, sold: 90, margin: 0.2, stock: 60 }, r, now).state, 'proven');
+  // bought before the wallet's window and still selling: proven; on bid only: new; old stock nobody buys: drop
+  assert.equal(L.lineStatus({ buys: [], sold: 12, margin: null, stock: 5 }, r, now).state, 'proven');
+  assert.equal(L.lineStatus({ buys: [], sold: 0, margin: null, stock: 0 }, r, now).state, 'new');
+  assert.equal(L.lineStatus({ buys: [], sold: 0, margin: null, stock: 2 }, r, now).state, 'drop');
+});
+
+test('price changes are counted from the issue times EVE restamps', () => {
+  const fees = { broker: 0.015, modify: 0.0039 };
+  const t0 = '2026-11-17T15:00:00Z', t1 = '2026-11-17T20:48:00Z';
+  const first = L.orderChanges(null, [{ order_id: 1, issued: t0, price: 838000, volume_remain: 210, is_buy_order: true }, { order_id: 2, issued: t0, price: 1007000, volume_remain: 36, is_buy_order: false }], fees);
+  assert.deepEqual(first.changes, []);                                                    // the first look only takes note
+  const second = L.orderChanges(first.log, [
+    { order_id: 1, issued: t1, price: 839900, volume_remain: 210, is_buy_order: true },      // bumped: the fee on the order, and the broker's share of the escrow added
+    { order_id: 2, issued: t0, price: 1007000, volume_remain: 30, is_buy_order: false },     // sold some, not changed
+    { order_id: 3, issued: t1, price: 500, volume_remain: 10, is_buy_order: false }], fees); // new: noted, not counted
+  assert.equal(second.changes.length, 1);
+  assert.equal(second.changes[0].id, 1);
+  assert.ok(Math.abs(second.changes[0].fee - (839900 * 210 * 0.0039 + 1900 * 210 * 0.015)) < 0.01);
+  assert.deepEqual(Object.keys(second.log), ['1', '2', '3']);
+  assert.deepEqual(L.orderChanges(second.log, [{ order_id: 1, issued: t1, price: 839900, volume_remain: 200, is_buy_order: true }], fees).changes, []);
+});
+
+test('exposure: committed ISK by hub against the limits, and the gate on new lines', () => {
+  const lines = [
+    { isk: 176e6, proven: false, hubs: [{ name: 'Amarr', share: 0.47 }, { name: 'Rens', share: 0.32 }, { name: 'Dodixie', share: 0.21 }] },
+    { isk: 150e6, proven: false, hubs: [{ name: 'Amarr', share: 1 }] },
+    { isk: 300e6, proven: true, hubs: [{ name: 'Dodixie', share: 1 }] },
+    { isk: 40e6, proven: true, hubs: null },
+    { isk: 0, proven: false, hubs: [{ name: 'Hek', share: 1 }] },
+  ];
+  const lim = { reserve: 2e9, unproven: 4e9, hub: 2e9 };
+  const ex = L.exposure(lines, 2.39e9, lim);
+  assert.equal(ex.total, 666e6); assert.equal(ex.unproven, 326e6); assert.equal(ex.loose, 40e6);
+  assert.deepEqual(ex.hubs.map(x => x.name), ['Dodixie', 'Amarr', 'Rens']);
+  assert.ok(Math.abs(ex.hubs[1].isk - (176e6 * 0.47 + 150e6)) < 1);
+  assert.deepEqual(ex.gate, { open: true, why: [] });
+  // each limit closes the gate and says why
+  assert.match(L.exposure(lines, 1.9e9, lim).gate.why[0], /wallet, 1\.90B, is under your reserve of 2\.00B/);
+  assert.match(L.exposure(lines, 2.39e9, Object.assign({}, lim, { unproven: 300e6 })).gate.why[0], /Unproven lines hold 326\.0M, over your limit of 300\.0M/);
+  const tight = L.exposure(lines, 2.39e9, Object.assign({}, lim, { hub: 200e6 }));
+  assert.equal(tight.gate.open, false);
+  assert.deepEqual(tight.hubs.filter(x => x.over).map(x => x.name), ['Dodixie', 'Amarr']);
+  assert.equal(tight.gate.why.length, 2);
+  assert.deepEqual(L.exposure([], null, lim).gate.open, true);
+});
+
+test('sync carries the limits and the week\'s change count', () => {
+  const keep = { pins: 1e9, copied: 1e9 };
+  const a = { risk: { v: { reserve: 2e9, unproven: 4e9, hub: 2e9, trip: 1e9 }, at: 5 }, weeks: { w: { '2026-11-16': { bumps: { n: 14, fee: 5.1e6 } } } } };
+  const b = { risk: { v: { reserve: 1.5e9, unproven: 4e9, hub: 2e9, trip: 1e9 }, at: 9 }, weeks: { w: { '2026-11-16': { bumps: { n: 9, fee: 3.3e6 } } } } };
+  const ab = L.syncMerge(a, b, 100, keep), ba = L.syncMerge(b, a, 100, keep);
+  assert.equal(L.stable(ab), L.stable(ba));
+  assert.equal(ab.risk.v.reserve, 1.5e9);                                    // the newer setting
+  assert.deepEqual(ab.weeks.w['2026-11-16'].bumps, { n: 14, fee: 5.1e6 });   // the fuller count
+  assert.equal(L.syncMerge(a, {}, 100, keep).risk.at, 5);
+});

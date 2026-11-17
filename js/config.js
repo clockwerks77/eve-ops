@@ -80,6 +80,27 @@ window.EVEOPS_CONFIG = {
   // A line with no sale for this many days is listed under "Slow lines".
   staleDays: 14,
 
+  // ---- Safeguards (version 25): the brakes for a book of several billion.
+  risk: {
+    // A hub counts for a line, and a bid is worth keeping, only where it nets `floor` or better after every fee.
+    // The max bid shown on a buy order is the highest bid that still leaves `margin` across the hubs the line goes to.
+    floor: 0.10, margin: 0.15,
+    // A line with no sale of yours on record goes to at most `top` hubs, each read from its book and its region's price history:
+    // the lowest of the ask, the last day's average, the week's average and `spike` times the month's average (so a thin spike does not count),
+    // and only hubs trading at least `minPerDay` a day.
+    top: 3, spike: 1.15, minPerDay: 5,
+    // A bid this far under the top bid will not fill: flagged as a typo or a bid the market has left behind.
+    behind: 0.15,
+    // Probation: a line earns a re-bid once `half` of its first lot (everything bought within `lotDays` of the first purchase) has sold
+    // at the floor or better. `days` after that first purchase and still short of it, the call is to clear the stock and drop the line.
+    probation: { lotDays: 3, half: 0.5, days: 14 },
+    // Limits, each changeable on the page (Exposure panel, and the haul manifest for `trip`): the wallet to keep back, the most to have
+    // committed to unproven lines, the most headed for any one hub, and the most stock (at cost) to carry in one trip.
+    limits: { reserve: 2e9, unproven: 4e9, hub: 2e9, trip: 1e9 },
+    // The week's price-change fees are called out when they pass this share of the week's net.
+    feeShare: 0.05,
+  },
+
   // ---- Expedition ops (the wormhole camp): Phase A, Muster and Kit & Shopping.
   expedition: {
     // Adam flies two characters on one account, never both at once: one seat, two modes.

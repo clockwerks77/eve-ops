@@ -31,7 +31,8 @@ const { serve, playwright, chrome, midweek } = require('./serve.js');
   // ---- trip plan: a route line
   const names = async () => (await page.locator('.trip-name').allInnerTexts()).join(' > ');
   ok('the plan starts where the character is docked', /^Hek > /.test(await names()) && await page.locator('.trip-stop.is-here .trip-here').count() === 1 && await page.locator('.trip-stop.is-here .trip-track').count() === 0);
-  ok('stock is picked up in Jita before it is dropped', /Jita > Hek again/.test(await names()));
+  const order = (await names()).split(' > '), jitaAt = order.indexOf('Jita');
+  ok('stock is picked up in Jita before it is dropped', jitaAt > 0 && order.indexOf('Hek again') > jitaAt && ['Rens', 'Dodixie'].every(x => order.indexOf(x) > jitaAt), order.join(' > '));
   const total = Number((await text('.trip-total')).match(/^(\d+) jump/)[1]);
   const legs = (await page.locator('.trip-leg').allInnerTexts()).map(t => Number((t.match(/(\d+) jump/) || [0, 0])[1]));
   ok('the legs add up to the total (' + total + ' jumps)', legs.reduce((a, b) => a + b, 0) === total);
@@ -52,7 +53,7 @@ const { serve, playwright, chrome, midweek } = require('./serve.js');
   await page.locator('.trip-name', { hasText: 'Dodixie' }).click(); await page.waitForTimeout(150);
   ok('a stop in the plan opens that hub', /Dodixie/.test(await text('.stop h2')));
   await page.locator('.trip-mode >> text=Hide').click(); await page.waitForTimeout(150);
-  ok('hidden, the plan keeps one line with the next stop', await page.locator('.trip-line').count() === 0 && /Next: Rens/.test(await text('.trip-head')));
+  ok('hidden, the plan keeps one line with the next stop', await page.locator('.trip-line').count() === 0 && (await text('.trip-head')).includes('Next: ' + order[1]));
 
   // ---- cargo hold
   const hold = page.locator('#hold');

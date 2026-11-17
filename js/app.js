@@ -121,7 +121,10 @@
     pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, openCalls: new Set(), journal: null, costs: (!demo && E.store.get('eveops.costs')) || null, costDraft: null, costNote: null, notify: Object.assign({ change: false, extractors: false, launchpad: false }, E.store.get('eveops.notify')), notifyAllowed: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), fold: (!demo && E.store.get('eveops.fold')) || {}, tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
     prices: new Map(), tab: null, follow: true, view: !location.hash && window.Ex && window.Ex.campOpen() ? 'ex' : viewOf(location.hash), hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
     seen: (!demo && E.store.get('eveops.seen')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
+    reads: new Map(), riskSet: (!demo && E.store.get('eveops.risk')) || null,
   };
+  /** The four limits of the safeguards: the page's defaults, with whatever has been set here (or on another device) over them. */
+  function limits() { return Object.assign({}, C.risk.limits, S.riskSet && S.riskSet.v); }
   const me = () => '/characters/' + S.who.id;
   function feed(name, entry) { S.feeds[name] = { at: entry.modified, next: entry.expires, err: null }; }
   async function load(name, fn) {
@@ -147,7 +150,18 @@
   async function loadWallet() { const r = await E.get(me() + '/wallet/', { auth: true }); S.wallet = r.data; feed('Wallet', r); }
   async function loadOrders() {
     const r = await E.get(me() + '/orders/', { auth: true }); S.orders = r.data; S.ordersAt = r.modified; feed('Your orders', r);
+    noteChanges();
     S.history = await E.get(me() + '/orders/history/', { auth: true }).then(x => x.data, () => S.history);
+  }
+  /** Counts the price changes made since the orders were last read, week by week, for the fee meter under "Since Monday". */
+  function noteChanges() {
+    const ch = L.orderChanges(demo ? window.Demo.orderLog : E.store.get('eveops.orderlog'), S.orders, C.fees);
+    if (demo) window.Demo.orderLog = ch.log; else E.store.set('eveops.orderlog', ch.log);
+    for (const c of ch.changes) {
+      const key = L.weekKey(c.at), w = S.weeks.w[key] || (S.weeks.w[key] = {});
+      w.bumps = { n: ((w.bumps || {}).n || 0) + 1, fee: ((w.bumps || {}).fee || 0) + c.fee };
+    }
+    if (ch.changes.length) saveWeeks(true);
   }
   const hubOf = new Map(C.hubs.map(hb => [hb.station, hb]));
   /** Stock of items you trade, sitting loose in a station hangar. Map type -> units. */
@@ -341,6 +355,7 @@
     for (const o of S.orders) {
       want.set(o.region_id + ':' + o.type_id, [o.region_id, o.type_id]);
       if (!o.is_buy_order) want.set(C.jita.region + ':' + o.type_id, [C.jita.region, o.type_id]);
+      else for (const hb of C.hubs) want.set(hb.region + ':' + o.type_id, [hb.region, o.type_id]);       // a bid is judged by what the hubs pay
     }
     for (const p of S.planets) if (p.product) for (const hb of C.hubs) want.set(hb.region + ':' + p.product, [hb.region, p.product]);
     const waiting = Array.from(new Set(Array.from(hangarAt(C.jita.station).keys()).concat(Array.from(cargoHold().keys()))));
@@ -365,6 +380,33 @@
       next: isFinite(soonest) ? soonest : Date.now() + M,
       err: failed ? failed + ' of ' + want.size + ' books did not load.' : null,
     };
+  }
+  /**
+   * A month of each hub's price history for the lines you have never sold or listed at a hub (on bid, in the Jita hangar or in the hold).
+   * Until your own sales say more, this and the book are what a hub is read from. EVE republishes it once a day.
+   */
+  async function loadReads() {
+    const known = new Set();
+    for (const t of S.tx) if (!t.is_buy && t.location_id !== C.jita.station && hubOf.has(t.location_id)) known.add(t.type_id);
+    for (const o of S.orders) if (!o.is_buy_order && o.location_id !== C.jita.station && hubOf.has(o.location_id)) known.add(o.type_id);
+    const types = new Set(S.orders.filter(o => o.is_buy_order).map(o => o.type_id));
+    for (const t of hangarAt(C.jita.station).keys()) types.add(t);
+    for (const t of cargoHold().keys()) types.add(t);
+    const want = new Map();
+    for (const t of types) {
+      if (known.has(t) || C.zeroCostTypes.indexOf(t) >= 0 || C.planetTypes.indexOf(t) >= 0) continue;
+      for (const hb of C.hubs) if (hb.station !== C.jita.station) want.set(hb.region + ':' + t, [hb.region, t]);
+    }
+    let failed = 0, oldest = Infinity, soonest = Infinity;
+    await Promise.all(Array.from(want, async ([key, rt]) => {
+      try {
+        const r = await E.get('/markets/' + rt[0] + '/history/', { query: { type_id: rt[1] } });
+        S.reads.set(key, r.data); oldest = Math.min(oldest, r.modified); soonest = Math.min(soonest, r.expires);
+      } catch (err) { failed++; }
+    }));
+    for (const k of Array.from(S.reads.keys())) if (!want.has(k)) S.reads.delete(k);
+    if (want.size) S.feeds['Price history'] = { at: isFinite(oldest) ? oldest : 0, next: isFinite(soonest) ? soonest : Date.now() + H, err: failed ? failed + ' of ' + want.size + ' histories did not load.' : null };
+    else delete S.feeds['Price history'];
   }
   /** Rival bids placed elsewhere only count if their range reaches my station: measure the ones that matter. */
   async function loadReach() {
@@ -463,7 +505,7 @@
       await resolveNames(ids).catch(() => {});
       S.ready = true; paint();
       await load('Planets', loadPlanets);
-      await Promise.all([load('Market books', loadBooks), load('Routes', loadRoutes), load('Item prices', loadPrices), load('Second character', loadScout)]);
+      await Promise.all([load('Market books', loadBooks), load('Routes', loadRoutes), load('Item prices', loadPrices), load('Second character', loadScout), load('Price history', loadReads)]);
       await loadReach().catch(() => {});
       paint();
       await Promise.all([loadHistory().catch(() => {}), load('Loot prices', loadLoot)]);
@@ -484,6 +526,8 @@
     const myIds = new Set(S.orders.map(o => o.order_id));
     const windowDays = led.from ? (now - led.from) / D : 0;
     const hubSet = new Set(C.hubs.map(x => x.station));
+    const R = C.risk, lim = limits();
+    const away = C.hubs.filter(hb => hb.station !== C.jita.station);
 
     const listedByType = new Map();
     for (const o of S.orders) if (!o.is_buy_order) listedByType.set(o.type_id, (listedByType.get(o.type_id) || 0) + o.volume_remain);
@@ -507,6 +551,56 @@
       return px.length ? Math.min.apply(null, px) : null;
     };
     const hubName = id => (hubOf.get(id) || {}).name || ((K.systems[(K.stations[id] || {}).system] || {}).name) || 'another station';
+
+    // ---- safeguards: where each line goes, the most a bid on it may be, and whether it has earned a re-bid
+    const myLow = new Map();
+    for (const o of S.orders) if (!o.is_buy_order) { const k = o.location_id + ':' + o.type_id; myLow.set(k, Math.min(myLow.has(k) ? myLow.get(k) : Infinity, o.price)); }
+    const planCache = new Map(), sold7 = new Map();
+    for (const x of led.sales) if (now - x.date <= 7 * D) { const k = x.type_id + ':' + x.location_id, e = sold7.get(k) || { qty: 0, gross: 0 }; e.qty += x.qty; e.gross += x.gross; sold7.set(k, e); }
+    /** The plan for one item at one cost: `buyFee` is the broker's share when the cost is a bid still to fill. */
+    const planFor = (type, cost, buyFee) => {
+      const key = type + ':' + cost + ':' + buyFee;
+      if (planCache.has(key)) return planCache.get(key);
+      const hubs = [];
+      for (const hb of away) {                     // hubs you have sold it in or list it in: counted at the front of the book there
+        const v = vel.get(type + ':' + hb.station), mine = myLow.get(hb.station + ':' + type), a = ask(type, hb);
+        if (!(v && v.last) && mine == null) continue;
+        const front = a == null ? mine : mine == null ? a : Math.min(a, mine), wk = sold7.get(type + ':' + hb.station);
+        // a front well under what you sold at there this week is a dump, which drains: the hub is counted at no less than 93% of your week's average
+        if (front != null) hubs.push({ name: hb.name, station: hb.station, price: wk && wk.qty ? Math.max(front, 0.93 * wk.gross / wk.qty) : front, ask: a, perDay: v ? v.d7 / 7 : 0, thin: false });
+      }
+      const sold = hubs.length > 0;
+      if (!sold) for (const hb of away) {          // never sold at a hub: each hub is read from its book and its region's history
+        const hist = S.reads.get(hb.region + ':' + type);
+        if (!hist) continue;
+        const rd = L.hubRead(ask(type, hb), hist, now, R.spike);
+        if (rd.price != null && rd.perDay >= R.minPerDay) hubs.push({ name: hb.name, station: hb.station, price: rd.price, ask: rd.ask, perDay: rd.perDay, thin: rd.thin });
+      }
+      const g = Object.assign(L.destPlan(hubs, { cost, buyFee, netMult: NET, floor: R.floor, margin: R.margin, top: R.top }), { read: hubs, sold });
+      planCache.set(key, g);
+      return g;
+    };
+    const buysBy = new Map(), soldBy = new Map(), stockBy = new Map(listedByType);
+    for (const t of S.tx) if (t.is_buy) { if (!buysBy.has(t.type_id)) buysBy.set(t.type_id, []); buysBy.get(t.type_id).push({ at: Date.parse(t.date), qty: t.quantity }); }
+    for (const b of buysBy.values()) b.sort((x, y) => x.at - y.at);
+    for (const x of led.sales) {
+      const e = soldBy.get(x.type_id) || { units: 0, net: 0, cost: 0 };
+      e.units += x.qty;
+      if (x.net != null && x.cost > 0) { e.net += x.net; e.cost += x.cost; }
+      soldBy.set(x.type_id, e);
+    }
+    for (const a of S.assets) if (!a.is_singleton && (a.location_flag === 'Hangar' || a.location_flag === 'Cargo')) stockBy.set(a.type_id, (stockBy.get(a.type_id) || 0) + a.quantity);
+    const statusCache = new Map(), madeHere = new Set(C.planetTypes);
+    /** Whether a line has proven itself: 'proven', 'new', 'probation' or 'drop' (see lineStatus). What comes off your own colonies is proven. */
+    const statusOf = type => {
+      if (statusCache.has(type)) return statusCache.get(type);
+      const e = soldBy.get(type) || { units: 0, net: 0, cost: 0 };
+      const st = zero.has(type) || madeHere.has(type) ? { state: 'proven', sold: e.units, lot: 0, first: null, thin: false }
+        : L.lineStatus({ buys: buysBy.get(type) || [], sold: e.units, margin: e.cost > 0 ? e.net / e.cost : null, stock: stockBy.get(type) || 0 }, Object.assign({ floor: R.floor }, R.probation), now);
+      if (st.state === 'drop' && !st.lot && windowDays < R.probation.days) st.state = 'new';      // too little history to call it
+      statusCache.set(type, st);
+      return st;
+    };
     // restock: what is already on the way, and the bid that would lead in Jita
     const onBid = new Map();
     for (const o of S.orders) if (o.is_buy_order) onBid.set(o.type_id, (onBid.get(o.type_id) || 0) + o.volume_remain);
@@ -526,7 +620,9 @@
       const net = bid != null && hubPrice != null ? hubPrice * NET - bid : null;
       const margin = net != null && bid ? net / bid : null;
       const mk = S.copied['r' + type] && !S.copied['r' + type].gone ? S.copied['r' + type] : null;
+      const stt = statusOf(type);
       restock.push({ type, name: nameOf(type), hub: hubName(loc), left, perDay: d7 / 7, days, bid, coming, want: Math.max(0, Math.round(d7) - left - coming), net, margin, thin: margin != null && margin < C.restock.minMargin,
+        probation: stt.state === 'proven' ? null : stt,
         copied: mk ? { state: 'waiting', price: mk.price, at: mk.at, moved: bid != null && mk.price !== bid } : null });
     };
 
@@ -579,7 +675,7 @@
       for (const x of g) {
         const price = x.pos ? x.pos.price : x.order.price, remain = x.pos ? x.pos.remain : x.order.volume_remain;
         const pl = plan.get(x.order.order_id) || { action: 'wait', reason: 'Waiting for the market book.', target: null }, pn = pinOf(x.order.order_id, price);
-        const gone = x.pos && x.pos.status === 'gone';
+        const gone = x.pos && x.pos.status === 'gone', cp = markOf(x.order.order_id, price, pl, pn, book);
         if (!gone) {
           left += remain; listed += price * remain;
           if (cost != null) listedCost += cost * remain; else uncosted += remain;
@@ -589,8 +685,8 @@
           price, remain, total: x.order.volume_total, pos: x.pos, cost, vel: v,
           expires: Date.parse(x.order.issued) + x.order.duration * D, region: x.order.region_id,
           week: S.hist.get(x.order.region_id + ':' + x.order.type_id) || null,
-          checks: L.orderChecks({ isBuy: false, price, duration: x.order.duration, known: hubSet.has(x.order.location_id), front: x.pos ? x.pos.front : null, cost, netMult: NET }),
-          plan: pl, pin: pn, typed: typed(pl, pn), copied: markOf(x.order.order_id, price, pl, pn, book),
+          checks: L.orderChecks({ isBuy: false, price, duration: x.order.duration, known: hubSet.has(x.order.location_id), front: x.pos ? x.pos.front : null, cost, netMult: NET, copied: cp && cp.state === 'missed' ? cp.price : null }),
+          plan: pl, pin: pn, typed: typed(pl, pn), copied: cp, status: statusOf(x.order.type_id).state,
         });
       }
       consider(o0.type_id, o0.location_id, left, v.d7, g.reduce((m, x) => Math.min(m, x.pos ? x.pos.price : x.order.price), Infinity));
@@ -598,9 +694,10 @@
       const quiet = windowDays >= C.staleDays && now - v.last > C.staleDays * D && now - lastBuy > C.staleDays * D;
       const clear = v.d7 > 0 ? left / (v.d7 / 7) : null;
       const settled = now - lastBuy > 7 * D;
-      if (left > 0 && (quiet || (settled && clear != null && clear > 30))) slow.push({ type: o0.type_id, name: nameOf(o0.type_id), stop: o0.location_id, left, last: v.last, clear, quiet });
+      const stt = statusOf(o0.type_id), drop = stt.state === 'drop' ? stt : null;
+      if (left > 0 && (quiet || (settled && clear != null && clear > 30) || drop)) slow.push({ type: o0.type_id, name: nameOf(o0.type_id), stop: o0.location_id, left, last: v.last, clear, quiet, drop });
     }
-    slow.sort((a, b) => (b.quiet - a.quiet) || ((b.clear || 1e9) - (a.clear || 1e9)));
+    slow.sort((a, b) => (!!b.drop - !!a.drop) || (b.quiet - a.quiet) || ((b.clear || 1e9) - (a.clear || 1e9)));
 
     let escrow = 0, bidCount = 0;
     for (const o of S.orders) {
@@ -609,13 +706,17 @@
       const b = S.books.get(o.region_id + ':' + o.type_id), st = K.stations[o.location_id];
       const pos = b && st ? L.buyPosition(o, b.orders, myIds, b.modified >= S.ordersAt, r => reaches(r, o, st.system)) : null;
       const price = pos ? pos.price : o.price;
-      const pl = pos ? L.planBid(pos, { broker: C.fees.broker, modify: C.fees.modify, bigMove: C.bigMove }) : { action: 'wait', reason: 'Waiting for the market book.', target: null }, pn = pinOf(o.order_id, price);
+      // the bid as the book alone would call it, then held to what the hubs pay: over its max it is left, under the floor it is pulled
+      const g = planFor(o.type_id, price, C.fees.broker), known = g.state !== 'unknown';
+      const pl = pos ? L.guardBid(L.planBid(pos, { broker: C.fees.broker, modify: C.fees.modify, bigMove: C.bigMove }), pos, g) : { action: 'wait', reason: 'Waiting for the market book.', target: null }, pn = pinOf(o.order_id, price);
+      const cp = markOf(o.order_id, price, pl, pn, b);
       stop(o.location_id).bids.push({
         id: o.order_id, type: o.type_id, name: nameOf(o.type_id), price, remain: pos ? pos.remain : o.volume_remain,
         total: o.volume_total, pos, escrow: o.escrow || 0, days: o.duration,
         expires: Date.parse(o.issued) + o.duration * D, region: o.region_id, week: null,
-        checks: L.orderChecks({ isBuy: true, price, duration: o.duration, known: hubSet.has(o.location_id), wall: pos ? pos.wall : null }),
-        plan: pl, pin: pn, typed: typed(pl, pn), copied: markOf(o.order_id, price, pl, pn, b),
+        checks: L.orderChecks({ isBuy: true, price, duration: o.duration, known: hubSet.has(o.location_id), wall: pos ? pos.wall : null, behind: R.behind, max: known ? g.max : null, copied: cp && cp.state === 'missed' ? cp.price : null }),
+        plan: pl, pin: pn, typed: typed(pl, pn), copied: cp, status: statusOf(o.type_id).state,
+        guard: known ? { state: g.state, max: g.max, margin: g.margin, hubs: g.hubs, sold: g.sold } : null,
       });
     }
     if (pinsChanged && !demo) E.store.set('eveops.pins', S.pins);
@@ -637,7 +738,8 @@
     }
 
     const rank = { tick: 0, optional: 1, wait: 2, none: 3, hold: 4 };
-    const order = r => (r.checks.length ? -2 : r.pin && !r.pin.done ? -1 : rank[r.plan.action] + (r.plan.action === 'hold' && r.pos && r.pos.status === 'leading' ? 1 : 0));
+    const pulled = r => r.plan.kind === 'pull';
+    const order = r => (r.checks.length || pulled(r) ? -2 : r.pin && !r.pin.done ? -1 : rank[r.plan.action] + (r.plan.action === 'hold' && r.pos && r.pos.status === 'leading' ? 1 : 0));
     const here = S.loc ? S.loc.station_id || S.loc.structure_id || null : null;
     const hop = id => {
       const s = K.systems[id] || { name: 'System ' + id, sec: 1 }, k = S.kills.get(id) || {};
@@ -662,10 +764,10 @@
         docked: here != null && here === s.id, inSystem: !!(S.loc && st.system && S.loc.solar_system_id === st.system),
         jumps: r.short ? r.short.length - 1 : null,
         shortRoute: r.short ? r.short.map(hop) : null, safeRoute: r.safe && !same ? r.safe.map(hop) : null, routeErr: r.err || null,
-        change: rows.filter(toChange).length,
+        change: rows.filter(toChange).length, changeFee: sum(rows.filter(toChange), x => x.plan.fee || 0),
         copied: rows.filter(x => toChange(x) && held(x)).length,
         optional: rows.filter(x => x.plan.action === 'optional').length,
-        check: rows.filter(x => x.checks.length).length,
+        check: rows.filter(x => x.checks.length || pulled(x)).length,
         waiting: rows.filter(x => x.pin && !x.pin.done).length,
         pinned: rows.filter(x => x.pin).length,
       });
@@ -771,15 +873,20 @@
     restock.sort((a, b) => (a.thin - b.thin) || a.days - b.days || (b.net || 0) * b.perDay - (a.net || 0) * a.perDay);
 
     // ---- haul manifest: what is waiting in the Jita hangar and where each item sells
-    const away = C.hubs.filter(hb => hb.station !== C.jita.station);
     const haulRows = Array.from(jitaHang, e => {
       const asks = away.map(hb => ({ name: hb.name, ask: ask(e[0], hb), sold: (vel.get(e[0] + ':' + hb.station) || {}).d7 || 0 }));
       const proven = asks.filter(a => a.ask != null && a.sold > 0);
       const pool = proven.length ? proven : asks.filter(a => a.ask != null);
-      const best = pool.length ? pool.reduce((a, b) => (b.ask > a.ask ? b : a)) : null;
-      return { type: e[0], name: nameOf(e[0]), qty: e[1], m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks, best: best ? best.name : null };
+      const top = pool.length ? pool.reduce((a, b) => (b.ask > a.ask ? b : a)) : null;
+      const c = costFor(e[0], e[1]), unit = c ? c.cost : null, g = planFor(e[0], unit || 0, 0);
+      // A line you have not sold this week goes where its plan says, shared out by pace, and not simply to the highest ask (which may be one thin listing).
+      const planned = !proven.length && g.hubs.length ? g : null;
+      for (const a of asks) { const rd = g.read.find(x => x.name === a.name); a.thin = !!(rd && rd.thin); a.counts = rd && rd.thin ? rd.price : null; }
+      return { type: e[0], name: nameOf(e[0]), qty: e[1], m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks, best: planned ? planned.hubs[0].name : top ? top.name : null,
+        split: planned && planned.state === 'ok' && planned.hubs.length > 1 ? L.splitUnits(e[1], planned.hubs) : null, under: !!planned && planned.state === 'under', fresh: !!planned && !planned.sold,
+        unit, value: unit != null ? unit * e[1] : null, floor: unit > 0 ? L.tickCeil(unit * (1 + R.floor) / NET) : null, status: statusOf(e[0]).state };
     }).sort((a, b) => a.name.localeCompare(b.name));
-    const haul = { rows: haulRows, units: sum(haulRows, r => r.qty), m3: sum(haulRows, r => r.m3), cargo: S.cargo };
+    const haul = { rows: haulRows, units: sum(haulRows, r => r.qty), m3: sum(haulRows, r => r.m3), cargo: S.cargo, value: sum(haulRows, r => r.value || 0), unpriced: haulRows.filter(r => r.value == null).length, cap: lim.trip };
 
     // ---- cargo hold: what is in the ship now, where each item sells, and what to list it at in each hub
     const holdRows = Array.from(cargoHold(), e => {
@@ -799,25 +906,38 @@
         else if (mine) why = String(mine.plan.reason || 'Hold.').replace(/\.$/, '').replace(/^./, x => x.toLowerCase());
         else if (front != null && c && front * NET <= c.cost) why = 'front is below your cost';
         else if (front != null && hb.station !== C.jita.station && js != null && front <= js) why = 'front is at or below the Jita sell price';
+        else if (front != null && c && c.cost > 0 && L.tickBelow(front) * NET - c.cost < R.floor * c.cost) why = 'one step under the front nets under ' + Math.round(R.floor * 100) + '%; your floor is ' + L.isk(L.tickCeil(c.cost * (1 + R.floor) / NET));
         else if (front != null) { price = L.tickBelow(front); why = 'front is ' + L.isk(front); }
         const net = price != null && c ? price * NET - c.cost : null;
         const mk = S.copied['g' + e[0] + ':' + hb.station];
         listing[hb.station] = { price, net, soft, why, margin: net != null && c.cost > 0 ? net / c.cost : null,
           copied: mk && !mk.gone ? { state: 'waiting', price: mk.price, at: mk.at, moved: price != null && mk.price !== price } : null };
       }
-      return { type: e[0], name: nameOf(e[0]), qty: e[1], m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks, best: best ? best.name : null, list: listing };
+      const c0 = costFor(e[0], e[1]);
+      return { type: e[0], name: nameOf(e[0]), qty: e[1], m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks, best: best ? best.name : null, list: listing, value: c0 ? c0.cost * e[1] : null };
     }).sort((a, b) => a.name.localeCompare(b.name));
-    const hold = { rows: holdRows, units: sum(holdRows, r => r.qty), m3: sum(holdRows, r => r.m3), at: (S.feeds.Hangars || {}).at || 0, ship: S.ship ? nameOf(S.ship.ship_type_id) : '' };
+    const hold = { rows: holdRows, units: sum(holdRows, r => r.qty), m3: sum(holdRows, r => r.m3), at: (S.feeds.Hangars || {}).at || 0, ship: S.ship ? nameOf(S.ship.ship_type_id) : '', value: sum(holdRows, r => r.value || 0), unpriced: holdRows.filter(r => r.value == null).length, cap: lim.trip };
+
+    // ---- exposure: every committed ISK by the hub it is headed for, against the limits
+    const exLines = [];
+    for (const st of list) {
+      for (const r of st.bids) exLines.push({ isk: r.escrow, proven: r.status === 'proven', hubs: r.guard && r.guard.hubs.length ? r.guard.hubs : null });
+      for (const r of st.sells) if (!(r.pos && r.pos.status === 'gone')) exLines.push({ isk: r.cost != null ? r.cost * r.remain : 0, proven: r.status === 'proven', hubs: [{ name: st.short, share: 1 }] });
+      if (st.id !== C.jita.station) for (const x of st.hangar) { const c = costFor(x.type, x.qty, st.id); exLines.push({ isk: c ? c.cost * x.qty : 0, proven: statusOf(x.type).state === 'proven', hubs: [{ name: st.short, share: 1 }] }); }
+    }
+    for (const r of haulRows) exLines.push({ isk: r.value || 0, proven: r.status === 'proven', hubs: r.split ? r.split.map(sp => ({ name: sp.name, share: sp.units / r.qty })) : r.best ? [{ name: r.best, share: 1 }] : null });
+    for (const r of holdRows) exLines.push({ isk: r.value || 0, proven: statusOf(r.type).state === 'proven', hubs: r.best ? [{ name: r.best, share: 1 }] : null });
+    const risk = { ex: L.exposure(exLines, S.wallet, lim), lim, bumps: (S.weeks.w[L.weekKey(now)] || {}).bumps || { n: 0, fee: 0 }, changeNow: { n: sum(list, st => st.change), fee: sum(list, st => st.changeFee) } };
 
     // ---- trip plan: the hubs with something to do, in the order that takes the fewest jumps
     const trip = (() => {
       if (!S.loc || !list.length) return null;
       const jita = C.jita.station, byName = new Map(C.hubs.map(hb => [hb.name, hb.station]));
       const drops = new Map();
-      for (const r of haulRows) { const to = byName.get(r.best); if (to && to !== jita) drops.set(to, (drops.get(to) || 0) + r.qty); }
+      for (const r of haulRows) for (const part of r.split || [{ name: r.best, units: r.qty }]) { const to = byName.get(part.name); if (to && to !== jita) drops.set(to, (drops.get(to) || 0) + part.units); }
       const lists = new Map();                              // already in the hold: units to list at the hub where each sells best
       for (const r of holdRows) { const to = byName.get(r.best); if (to) lists.set(to, (lists.get(to) || 0) + r.qty); }
-      const bids = restock.slice(0, 12).filter(r => r.bid != null && r.want && !r.thin).length;
+      const bids = restock.slice(0, 12).filter(r => r.bid != null && r.want && !r.thin && !r.probation).length;
       const viaJita = haulRows.length > 0 && list.some(s => s.id === jita) && !S.tripSkip.has(String(jita));
       // what there is to do at a hub, each with a tone so the plan can be read by colour
       const jobsAt = s => {
@@ -966,7 +1086,7 @@
 
     return {
       now, stops: list, slow: slow.slice(0, 8), tab: S.tab, pi,
-      restock: restock.slice(0, 12), haul, hold, trip, closes, alerts, changes, snapshot, seenAt: S.seen ? S.seen.at : null,
+      restock: restock.slice(0, 12), haul, hold, trip, closes, alerts, changes, snapshot, seenAt: S.seen ? S.seen.at : null, risk,
       wallet: S.wallet, escrow, bidCount, listed, listedCost, uncosted, held, wealth, priced: S.prices.size > 0, scout, both: wealth != null && scout ? wealth + scout.wealth : null,
       slots: S.skills ? { used: S.orders.length, max: 5 + 4 * lv(SKILL.trade) + 8 * lv(SKILL.retail) + 16 * lv(SKILL.wholesale) + 32 * lv(SKILL.tycoon) } : null,
       week: L.summarize(led.sales, L.startOfWeek(now), Infinity),
@@ -1053,10 +1173,11 @@
     const done = (r.pin && r.pin.done) || (r.copied && r.copied.state === 'landed');
     const lead = r.pos && r.pos.status === 'leading';
     const big = r.plan.kind === 'big', slow = r.plan.kind === 'slow';
-    const label = { tick: 'Change', optional: big ? 'Big move' : slow ? 'Slow line' : 'Sniper', wait: 'Loading', none: 'Gone', hold: lead ? (kind === 'sell' ? 'Leading' : 'Top bid') : 'Hold' }[r.plan.action];
-    const cls = { tick: 'chip-go', optional: big ? 'chip-big' : 'chip-opt', wait: 'chip-wait', none: 'chip-gone', hold: lead ? 'chip-lead' : 'chip-hold' }[r.plan.action];
+    const guard = r.plan.kind === 'over' || r.plan.kind === 'pull' ? r.plan.kind : null;      // a bid held to its max, or one that no longer pays
+    const label = { tick: 'Change', optional: big ? 'Big move' : slow ? 'Slow line' : 'Sniper', wait: 'Loading', none: 'Gone', hold: guard === 'over' ? 'Over max' : guard === 'pull' ? 'Pull' : lead ? (kind === 'sell' ? 'Leading' : 'Top bid') : 'Hold' }[r.plan.action];
+    const cls = { tick: 'chip-go', optional: big ? 'chip-big' : 'chip-opt', wait: 'chip-wait', none: 'chip-gone', hold: guard === 'pull' ? 'chip-pull' : guard ? 'chip-hold' : lead ? 'chip-lead' : 'chip-hold' }[r.plan.action];
     const depthShown = r.pos && r.plan.action === 'tick' && r.plan.kind !== 'mismatch' && (r.pos.status === 'undercut' || r.pos.status === 'behind' || r.pos.status === 'outbid');
-    const why = r.plan.action === 'hold' && lead ? null
+    const why = r.plan.action === 'hold' && lead && !guard ? null
       : r.plan.action === 'tick' ? (depthShown ? '' : r.plan.reason + ' ') + (r.plan.fee ? 'Changing costs ' + L.short(r.plan.fee) + '.' : '')
       : String(r.plan.reason || '').replace(/^Sniper: (.)/, (x, c) => c.toUpperCase()) + (slow && r.plan.fee ? ' Changing costs ' + L.short(r.plan.fee) + '.' : '');
     const soon = r.expires - Date.now() < 3 * D;
@@ -1078,7 +1199,11 @@
   }
   const rowClass = r => 'row is-' + r.plan.action + (r.pin && !r.pin.done ? ' is-pinned' : '') + (r.typed != null && r.copied && r.copied.state === 'waiting' && !r.copied.moved ? ' is-copied' + (r.copied.last ? ' is-last' : '') : '');
   function itemCell(r) {
-    return C_('item', 'Item', icon(r.type), h('span', { class: 'name' }, r.name, r.twin && h('span', { class: 'twin' }, num(r.total) + '-unit order')));
+    const fresh = r.status === 'drop' ? ['Drop', 'Two weeks on, or never sold, and under half of its first lot gone: clear the stock and drop the line.']
+      : r.status === 'probation' ? ['On probation', 'Selling, but under half of its first lot has gone yet: no re-bid until it has.']
+      : r.status === 'new' ? ['New line', 'Nothing sold yet: no re-bid until half of its first lot has gone.'] : null;
+    return C_('item', 'Item', icon(r.type), h('span', { class: 'name' }, r.name, r.twin && h('span', { class: 'twin' }, num(r.total) + '-unit order'),
+      fresh && h('span', { class: 'fresh' + (r.status === 'drop' ? ' is-drop' : ''), title: fresh[1] }, fresh[0])));
   }
 
   function sellRow(r) {
@@ -1110,7 +1235,10 @@
     return h('div', { class: rowClass(r) },
       itemCell(r),
       C_('left', 'Filled', h('b', null, num(r.total - r.remain)), h('span', { class: 'of' }, ' of ' + num(r.total))),
-      C_('yours', 'Your bid', L.isk(r.price)),
+      C_('yours', 'Your bid', L.isk(r.price), r.guard && r.guard.max != null ? h('span', { class: 'sub maxbid' + (r.guard.state === 'under' ? ' neg' : ''),
+        title: 'The highest bid that still leaves ' + Math.round(C.risk.margin * 100) + '% after every fee across ' + r.guard.hubs.map(x => x.name + ' at ' + L.isk(Math.round(x.price))).join(', ') + (r.guard.sold ? ' (the front of the book where you sell it).' : ' (read from each hub\u2019s book and price history).')
+          + (r.guard.margin != null ? ' At your bid it ' + (r.guard.margin < 0 ? 'loses ' : 'nets ') + Math.round(Math.abs(r.guard.margin) * 100) + '%.' : '') },
+        'max ' + L.isk(r.guard.max)) : null),
       C_('front', p && p.over.length ? 'Bids above you' : 'Next bid', p && p.over.length ? depth : [h('span', null, wall), depth && h('span', { class: 'sub' }, depth)]),
       callCell(r, 'bid'),
       typeCell(r),
@@ -1133,7 +1261,7 @@
     const pinnable = s.sells.concat(s.bids).filter(r => r.plan.action === 'tick' && r.plan.target != null && !(r.pin && !r.pin.done));
     const summary = [];
     if (s.check) summary.push(s.check + ' to check');
-    if (s.change) summary.push(s.change + ' to change');
+    if (s.change) summary.push(s.change + ' to change' + (s.changeFee >= 1000 ? ' for ' + L.short(s.changeFee) : ''));
     if (s.copied) summary.push(s.copied + ' of ' + s.change + ' copied');
     const restockMarks = s.id === C.jita.station ? m.restock.filter(r => r.copied).map(r => 'r' + r.type) : [];
     const marks = s.sells.concat(s.bids).filter(r => r.copied).map(r => r.id).concat(restockMarks);
@@ -1233,22 +1361,36 @@
       onclick: () => { if (shut) delete S.fold[key]; else S.fold[key] = true; if (!demo) E.store.set('eveops.fold', S.fold); paint(); } }, h('i', { class: 'fold-mark', 'aria-hidden': 'true' }), title));
   }
 
+  /** The most stock, at cost, to carry in one trip: a figure typed here, kept with the other limits. */
+  function capBox(cap) {
+    return h('label', { class: 'cargo' }, 'trip cap ', h('input', { class: 'isk-in lim-in', type: 'text', inputmode: 'decimal', 'data-keep': 'lim-trip', 'aria-label': 'The most stock, at cost, to carry in one trip', value: L.short(cap),
+      onchange: e => setLimit('trip', e.target.value), onkeydown: e => { if (e.key === 'Enter') e.target.blur(); } }));
+  }
+  const worth = x => L.short(x.value) + ' at cost' + (x.unpriced ? ', ' + plural(x.unpriced, 'item') + ' with no cost on record' : '');
   function haulView(m) {
-    const hl = m.haul, over = hl.m3 > hl.cargo;
-    return h('div', { class: 'block' + (folded('haul') ? ' is-folded' : '') },
+    const hl = m.haul, over = hl.m3 > hl.cargo, rich = hl.value > hl.cap;
+    return h('div', { class: 'block' + (folded('haul') ? ' is-folded' : ''), id: 'haul' },
       h('div', { class: 'block-head' }, foldHead('h3', 'haul', 'Haul manifest'),
         h('span', { class: over ? 'neg' : '' }, plural(hl.units, 'unit') + ', ' + num(Math.round(hl.m3)) + ' m³ of '),
         h('label', { class: 'cargo' }, h('input', { type: 'number', min: 0, step: 1, value: hl.cargo, 'aria-label': 'Cargo hold in cubic metres',
           onchange: e => { S.cargo = Math.max(0, Number(e.target.value) || 0); if (!demo) E.store.set('eveops.cargo', S.cargo); paint(); } }), ' m³ cargo'),
-        over && h('span', { class: 'chip chip-check' }, 'Over by ' + num(Math.round(hl.m3 - hl.cargo)) + ' m³')),
+        over && h('span', { class: 'chip chip-check' }, 'Over by ' + num(Math.round(hl.m3 - hl.cargo)) + ' m³'),
+        h('span', { class: 'worth' + (rich ? ' neg' : '') }, worth(hl)), capBox(hl.cap),
+        rich && h('span', { class: 'chip chip-check' }, 'Over your trip cap by ' + L.short(hl.value - hl.cap) + ': split the load')),
       folded('haul') ? null : h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
-        h('thead', null, h('tr', null, h('th', { class: 'l' }, 'In the Jita hangar'), h('th', null, 'Units'), h('th', null, 'm³'), hl.rows[0].asks.map(a => h('th', null, a.name)), h('th', null, 'Take to'))),
+        h('thead', null, h('tr', null, h('th', { class: 'l' }, 'In the Jita hangar'), h('th', null, 'Units'), h('th', null, 'm³'), h('th', null, 'At cost'), hl.rows[0].asks.map(a => h('th', null, a.name)), h('th', null, 'Take to'), h('th', null, 'Do not list below'))),
         h('tbody', null, hl.rows.map(r => h('tr', null,
           h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), r.name)),
           h('td', null, num(r.qty)), h('td', null, num(Math.round(r.m3))),
-          r.asks.map(a => h('td', { class: a.name === r.best ? 'best' : '' }, a.ask == null ? '' : L.isk(a.ask), a.sold ? h('span', { class: 'sub' }, 'you sold ' + num(a.sold) + ' this week') : null)),
-          h('td', { class: 'best' }, r.best || '')))))),
-      folded('haul') ? null : h('p', { class: 'note' }, 'Hub columns are the lowest ask there now. "Take to" prefers a hub where you sold this item in the last 7 days, then the highest ask.'));
+          h('td', null, r.value == null ? h('span', { class: 'sub' }, 'no cost') : L.short(r.value)),
+          r.asks.map(a => h('td', { class: a.name === r.best ? 'best' : '' },
+            a.ask == null ? '' : a.thin ? h('span', { class: 'thin', title: 'A thin listing far above what this trades at there: counted at ' + L.isk(Math.round(a.counts)) }, L.isk(a.ask)) : L.isk(a.ask),
+            a.sold ? h('span', { class: 'sub' }, 'you sold ' + num(a.sold) + ' this week') : null)),
+          h('td', { class: 'best' }, r.split ? r.split.map(x => x.name + ' ' + num(x.units)).join(', ') : r.best || '',
+            r.under ? h('span', { class: 'sub neg' }, 'no hub nets ' + Math.round(C.risk.floor * 100) + '%') : r.fresh ? h('span', { class: 'sub' }, 'by what each hub trades') : null),
+          h('td', null, r.floor == null ? '' : L.isk(r.floor))))))),
+      folded('haul') ? null : h('p', { class: 'note' }, 'Hub columns are the lowest ask there now; a dotted one is a thin listing far above what the item trades at, and is not counted. "Take to" prefers a hub where you sold this item in the last 7 days. A line you have not sold yet goes to the hubs that net '
+        + Math.round(C.risk.floor * 100) + '% or better, shared out by what each trades. "Do not list below" is the price that still nets ' + Math.round(C.risk.floor * 100) + '% on what you paid.'));
   }
   /** What is in the ship's cargo hold, where each item sells, and the price to list it at in the hub this panel is for. */
   function holdView(m, s) {
@@ -1257,6 +1399,8 @@
     return h('div', { class: 'block' + (folded('hold') ? ' is-folded' : ''), id: 'hold' },
       h('div', { class: 'block-head' }, foldHead('h3', 'hold', 'In your cargo hold'),
         h('span', null, plural(hd.units, 'unit') + ', ' + num(Math.round(hd.m3)) + ' m\u00b3' + (hd.ship ? ' in the ' + hd.ship : '')),
+        h('span', { class: 'worth' + (hd.value > hd.cap ? ' neg' : '') }, worth(hd)),
+        hd.value > hd.cap ? h('span', { class: 'chip chip-check' }, 'Over your trip cap of ' + L.short(hd.cap)) : null,
         here ? h('span', { class: 'chip chip-lead' }, plural(here, 'item') + ' to list here') : null,
         h('span', { class: 'why' }, 'as EVE last reported it, ', live('ago', hd.at))),
       folded('hold') ? null : h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
@@ -1275,7 +1419,9 @@
       folded('hold') ? null : h('p', { class: 'note' }, 'Items you have bought or sold on the market that are in the ship you are flying. The price follows the same rules as the Call column: your order for that item in ' + s.short + ' if you have one, else one legal step under the lowest ask, and none where that would sell under cost or under Jita. A dashed price is your call, or an item that sells better at the "Take to" hub. EVE reports hangars and cargo once an hour, so a load you have just taken on can take that long to appear.'));
   }
   function restockView(m) {
-    const offered = m.restock.filter(r => r.bid != null && r.want && !r.thin);
+    const offered = m.restock.filter(r => r.bid != null && r.want && !r.thin && !r.probation);
+    const held = r => (r.probation.state === 'drop' ? 'clear and drop: ' : 'on probation: ') + (r.probation.lot ? num(r.probation.sold) + ' of ' + num(r.probation.lot) + ' sold' : 'no sale on record')
+      + (r.probation.thin ? ', netting under ' + Math.round(C.risk.floor * 100) + '%' : '');
     const newest = offered.filter(r => r.copied && !r.copied.moved).reduce((a, r) => (!a || r.copied.at > a.copied.at ? r : a), null);
     if (newest) newest.copied.last = true;
     const want = offered.filter(r => !(r.copied && !r.copied.moved)).length;
@@ -1290,10 +1436,10 @@
           h('td', { class: r.left ? '' : 'neg' }, r.left ? num(r.left) : 'Sold out'),
           h('td', null, r.perDay.toFixed(1)), h('td', null, r.left ? r.days.toFixed(1) : ''),
           h('td', null, r.coming ? num(r.coming) : ''),
-          h('td', null, r.thin ? h('span', { class: 'sub' }, 'margin too thin') : r.want ? num(r.want) : h('span', { class: 'sub' }, 'covered')),
+          h('td', null, r.thin ? h('span', { class: 'sub' }, 'margin too thin') : r.probation ? h('span', { class: 'sub' + (r.probation.state === 'drop' ? ' neg' : '') }, held(r)) : r.want ? num(r.want) : h('span', { class: 'sub' }, 'covered')),
           h('td', null, r.net == null ? '' : [h('span', { class: r.thin ? 'neg' : '' }, L.short(r.net)), h('span', { class: 'sub' }, Math.round(r.margin * 100) + '%')]),
           h('td', null, offered.indexOf(r) >= 0 ? priceMark('r' + r.type, r.bid, r.copied, false) : '')))))),
-      folded('restock') ? null : h('p', { class: 'note' }, 'Units to bid is a week of your sales less what is left, already on bid, or waiting in the Jita hangar. The bid is one legal tick over the top Jita bid; net each is at the hub price after fees.'));
+      folded('restock') ? null : h('p', { class: 'note' }, 'Units to bid is a week of your sales less what is left, already on bid, or waiting in the Jita hangar. The bid is one legal tick over the top Jita bid; net each is at the hub price after fees. A line on probation is offered no bid until half of its first lot has sold.'));
   }
   function feedPanel(m) {
     const mark = () => { S.seen = { at: Date.now(), orders: m.snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); syncSoon(); paint(); };
@@ -1498,10 +1644,10 @@
 
   // ------------------------------------------------- sync between devices
   const PIN_KEEP = 36 * H;
-  const syncDoc = () => ({ v: 1, pins: S.pins, copied: S.copied, seen: S.seen, costs: S.costs, weeks: S.weeks });
+  const syncDoc = () => ({ v: 1, pins: S.pins, copied: S.copied, seen: S.seen, costs: S.costs, risk: S.riskSet, weeks: S.weeks });
   function syncApply(d) {
-    S.pins = d.pins || {}; S.copied = d.copied || {}; S.seen = d.seen || S.seen; S.weeks = Object.assign({ carried: null, w: {} }, d.weeks); S.costs = d.costs || S.costs;
-    if (!demo) { E.store.set('eveops.costs', S.costs); E.store.set('eveops.pins', S.pins); E.store.set('eveops.copied', S.copied); E.store.set('eveops.seen', S.seen); E.store.set('eveops.weeks', S.weeks); }
+    S.pins = d.pins || {}; S.copied = d.copied || {}; S.seen = d.seen || S.seen; S.weeks = Object.assign({ carried: null, w: {} }, d.weeks); S.costs = d.costs || S.costs; S.riskSet = d.risk || S.riskSet;
+    if (!demo) { E.store.set('eveops.costs', S.costs); E.store.set('eveops.risk', S.riskSet); E.store.set('eveops.pins', S.pins); E.store.set('eveops.copied', S.copied); E.store.set('eveops.seen', S.seen); E.store.set('eveops.weeks', S.weeks); }
   }
   let syncTimer = 0;
   function syncNow() {
@@ -1562,7 +1708,7 @@
     return h('section', { class: 'panel panel-sync' }, h('h3', null, 'Sync between devices'),
       st.on ? [
         h('p', { class: 'note' }, st.err ? h('span', { class: 'neg' }, st.err) : st.last ? ['On. Last checked ', live('ago', st.last), '.'] : 'On. Checking.'),
-        h('p', { class: 'note' }, 'Shared: pins, copied marks, "Mark as seen" and the weekly closes.'),
+        h('p', { class: 'note' }, 'Shared: pins, copied marks, "Mark as seen", the weekly closes and the exposure limits.'),
         h('div', { class: 'tools' },
           h('button', { type: 'button', class: 'btn btn-quiet', disabled: st.busy, onclick: () => { syncNow(); } }, 'Sync now'),
           h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { Y.disable(); S.syncNote = 'Sync is off on this device. The shared file was left on GitHub.'; paint(); } }, 'Turn off here'))]
@@ -1587,6 +1733,8 @@
         fact('Net after fees', L.short(m.week.net), 'estimate'),
         fact('Sold', L.short(m.week.gross), plural(m.week.units, 'unit')),
         fact('Today', L.short(m.today.net), L.short(m.today.gross) + ' sold'),
+        fact('Price changes', h('span', { class: m.week.net > 0 && m.risk.bumps.fee > C.risk.feeShare * m.week.net ? 'neg' : '', id: 'bumps' }, plural(m.risk.bumps.n, 'change')),
+          m.risk.bumps.n ? L.short(m.risk.bumps.fee) + ' in fees' + (m.week.net > 0 ? ', ' + (m.risk.bumps.fee / m.week.net * 100).toFixed(1) + '% of net' : '') : 'none seen this week'),
         m.closes && fact('Realized net to date', h('a', { href: '#closes', onclick: e => { e.preventDefault(); const el = document.getElementById('closes'); if (el) el.scrollIntoView({ behavior: 'smooth' }); } }, L.short(m.closes.toDate)), m.closes.carried == null ? 'since ' + new Date(m.closes.since).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : 'with the tracker\u2019s earlier weeks')),
       h('div', { class: 'bars', role: 'list', 'aria-label': 'Net after fees per day, last 14 days' },
         m.days.map((d, i) => {
@@ -1597,7 +1745,8 @@
             h('b', { class: 'day' }, new Date(d.day).toLocaleDateString('en-CA', { weekday: 'narrow' })));
         })),
       h('p', { class: 'note' }, 'Best of the last 14 days: ' + L.short(best.net) + ' on ' + new Date(best.day).toLocaleDateString('en-CA', { weekday: 'long' }) + '.'
-        + (m.week.uncovered ? ' ' + plural(m.week.uncovered, 'unit') + ' sold this week had no purchase on record, so they add to "Sold" but not to net.' : '')));
+        + (m.week.uncovered ? ' ' + plural(m.week.uncovered, 'unit') + ' sold this week had no purchase on record, so they add to "Sold" but not to net.' : '')
+        + (m.risk.changeNow.n ? ' Making every change on the board now would cost ' + L.short(m.risk.changeNow.fee) + '.' : '')));
   }
   function booksPanel(m) {
     return h('section', { class: 'panel' },
@@ -1613,6 +1762,34 @@
       h('dl', { class: 'facts facts-more' },
         fact('Listed, at cost', L.isk(Math.round(m.listedCost)), m.uncosted ? plural(m.uncosted, 'unit') + ' without a cost' : 'estimate'),
         m.slots && fact('Order slots', m.slots.used + ' of ' + m.slots.max)));
+  }
+  function setLimit(key, text) {
+    const v = L.parseIsk(String(text).trim());
+    if (v == null || v < 0) return paint();
+    S.riskSet = { v: Object.assign(limits(), { [key]: v }), at: Date.now() };
+    if (!demo) E.store.set('eveops.risk', S.riskSet);
+    syncSoon(); paint();
+  }
+  /** Every committed ISK (buy orders, and stock at what it cost) by the hub it is headed for, against three limits that can be typed over. */
+  function riskPanel(m) {
+    const ex = m.risk.ex, lim = m.risk.lim;
+    const box = (key, label) => h('input', { class: 'isk-in lim-in', type: 'text', inputmode: 'decimal', 'data-keep': 'lim-' + key, 'aria-label': label, value: L.short(lim[key]),
+      onchange: e => setLimit(key, e.target.value), onkeydown: e => { if (e.key === 'Enter') e.target.blur(); } });
+    const row = (label, value, bad, limit) => h('div', { class: 'fact' }, h('dt', null, label, limit ? h('span', { class: 'sub lim' }, limit) : null), h('dd', { class: bad ? 'neg' : '' }, value));
+    return h('section', { class: 'panel panel-risk', id: 'risk' },
+      h('h3', null, 'Exposure'),
+      h('p', { class: 'gate' }, h('span', { class: 'chip ' + (ex.gate.open ? 'chip-lead' : 'chip-pull') }, ex.gate.open ? 'New lines: open' : 'New lines: closed'),
+        ex.gate.open ? h('span', { class: 'sub' }, 'Every limit below has room.') : ex.gate.why.map(t => h('span', { class: 'sub neg' }, t))),
+      h('dl', { class: 'facts' },
+        row('Committed', L.short(ex.total), false, 'buy orders, and stock at cost'),
+        row('In unproven lines', L.short(ex.unproven), ex.unproven > lim.unproven, ['at most ', box('unproven', 'The most to have committed to unproven lines')]),
+        row('Wallet', m.wallet == null ? '' : L.short(m.wallet), m.wallet != null && m.wallet < lim.reserve, ['keep back ', box('reserve', 'The wallet to keep back')])),
+      h('dl', { class: 'facts facts-more' },
+        h('div', { class: 'fact' }, h('dt', null, 'Headed for', h('span', { class: 'sub lim' }, 'any one hub at most ', box('hub', 'The most headed for any one hub'))), h('dd', null, '')),
+        ex.hubs.map(x => row(x.name, L.short(x.isk), x.over)),
+        ex.loose > 0 ? row('No hub read yet', L.short(ex.loose), false) : null),
+      h('p', { class: 'note' }, 'A buy order counts where its line sells: split by your own sales there, or for a line you have not sold yet by what each hub trades. A line is unproven until half of its first lot has sold at ' + Math.round(C.risk.floor * 100) + '% or better. '
+        + 'While a limit is passed, new lines stay closed; re-bids on proven lines are not held back.'));
   }
   function piPanel(m) {
     return h('section', { class: 'panel' }, h('h3', null, 'Planetary Interaction Timers'),
@@ -1659,11 +1836,12 @@
       m.slow.length ? h('ul', { class: 'timers' }, m.slow.map(x => h('li', null,
         h('span', { class: 't-what' }, x.name, h('span', { class: 'sub' }, hub(x.stop) + ', ' + num(x.left) + ' left')),
         h('span', { class: 't-when' }, x.last ? ['Last sale ', live('ago', x.last)] : 'No sale on record',
+          x.drop ? h('span', { class: 'sub neg' }, 'Clear and drop: ' + (x.drop.lot ? num(x.drop.sold) + ' of ' + num(x.drop.lot) + ' sold' : 'never bought or sold on record')) : null,
           h('span', { class: 'sub' }, x.clear != null ? Math.round(x.clear) + ' days to clear at this pace' : 'no sales this week')))))
         : h('p', { class: 'note' }, m.windowDays < C.staleDays ? 'Needs ' + C.staleDays + ' days of sales history; EVE has returned ' + Math.floor(m.windowDays) + '.' : 'Every line has sold in the last ' + C.staleDays + ' days and clears within a month.'));
   }
   function dataPanel() {
-    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Wallet journal', 'Hangars', 'Planets', 'Kill feed', 'Item prices', 'Loot prices', 'Location', 'Skills and clones', 'Routes'];
+    const names = ['Market books', 'Your orders', 'Wallet', 'Sales and purchases', 'Wallet journal', 'Hangars', 'Planets', 'Kill feed', 'Item prices', 'Price history', 'Loot prices', 'Location', 'Skills and clones', 'Routes'];
     return h('section', { class: 'panel panel-data' }, h('h3', null, 'How fresh this is'),
       h('ul', { class: 'feeds' }, names.filter(n => S.feeds[n]).map(n => {
         const f = S.feeds[n];
@@ -1739,7 +1917,7 @@
       topView(m),
       m ? h('main', { class: 'board' },
         h('div', { class: 'stops' }, m.stops.length ? [tripView(m), tabsView(m), stopView(m.stops.find(s => s.id === m.tab) || m.stops[0], m), piView(m), closesView(m)] : [h('p', { class: 'empty' }, 'No open orders. Place one in game and it appears here within 20 minutes.'), piView(m), closesView(m)]),
-        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), notifyPanel(m), syncPanel(), dataPanel()))
+        h('aside', { class: 'side' }, feedPanel(m), weekPanel(m), booksPanel(m), riskPanel(m), piPanel(m), skillPanel(m), scoutSkills(m), clonePanel(m), slowPanel(m), notifyPanel(m), syncPanel(), dataPanel()))
         : h('main', { class: 'board' }, h('p', { class: 'empty' }, 'Loading your orders.')));
     root.querySelectorAll('.row > .call').forEach(el => { if (el.classList.contains('is-open') || el.scrollHeight > el.clientHeight + 2) el.classList.add('has-more'); });
     window.scrollTo(0, y);

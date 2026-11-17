@@ -26,6 +26,7 @@
     2474: 'Barren Advanced Industry Facility', 2524: 'Barren Command Center', 2544: 'Barren Launchpad', 2848: 'Barren Extractor Control Unit',
     30744: 'Neural Network Analyzer', 30745: 'Sleeper Data Library', 30746: 'Ancient Coordinates Database', 25624: 'Intact Armor Plates',
     30259: 'Melted Nanoribbons', 30377: 'Fullerite-C320', 30378: 'Fullerite-C540', 20424: 'Datacore - Mechanical Engineering', 11188: 'Stratios', 13278: 'Archaeology',
+    3244: 'Warp Disruptor II', 1978: 'Tracking Computer II', 448: 'Warp Scrambler II',
     3443: 'Trade', 3444: 'Retail', 16596: 'Wholesale', 18580: 'Tycoon', 33399: 'Infomorph Synchronizing', 16622: 'Accounting',
   };
 
@@ -61,7 +62,20 @@
     [12058, 40, 40, 2461000, [[2468000, 43], [2466000, 162], [2463000, 708]]],
     [2048, 25, 25, 1184000, [[1189000, 88], [1187000, 69]]],
     [380, 50, 50, 382600, [[383100, 2], [383000, 285], [382900, 100]]],
+    // the safeguards: a new line that is fine to bump, one the hubs no longer pay for, and one the market has left behind
+    [3244, 210, 210, 838000, [[839800, 35], [839700, 50], [839500, 793]]],
+    [1978, 159, 128, 945900, [[948000, 12], [947000, 30], [946000, 55]]],
+    [448, 129, 129, 760000, [[913200, 89], [913100, 674], [913000, 120]]],
   ];
+  // Lines never sold at a hub, so each hub is read from its book and its region's month of history.
+  // type -> { hub: [lowest ask, average traded price, units a day] }
+  const fresh = {
+    2281: { amarr: [2090000, 2085000, 60], dodixie: [2150000, 2140000, 35], hek: [2240000, 2210000, 20] },
+    12058: { amarr: [3120000, 3110000, 50], dodixie: [3080000, 3075000, 30], rens: [3190000, 3170000, 15] },
+    3244: { hek: [1182000, 1178000, 150], rens: [1098000, 1101000, 96], dodixie: [1117000, 1121000, 63], amarr: [2900000, 1220000, 27] },     // Amarr: one thin listing far above what it trades at
+    1978: { amarr: [1050000, 1061000, 170], dodixie: [1065000, 1070000, 80] },                                                                  // the hubs have fallen under this bid's floor
+    448: { amarr: [1170000, 1166000, 139], rens: [1174000, 1180000, 44] },
+  };
 
   let seed = 7;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -121,6 +135,14 @@
     rival(10000002, type, 60003466, true, Math.round(bid * 1.02 / 1000) * 1000, 30, 4 * H);
     book(10000002, type)[book(10000002, type).length - 1].system_id = 30000144;
   }
+
+  for (const type of Object.keys(fresh)) for (const hub of Object.keys(fresh[type])) rival(REGION[ST[hub]], Number(type), ST[hub], false, fresh[type][hub][0], 40, 6 * H);
+  // a first lot of the new line, bought yesterday and waiting in the Jita hangar
+  tx.push({ transaction_id: tid++, date: iso(1 * D), type_id: 3244, location_id: ST.jita, quantity: 120, unit_price: 836000, is_buy: true, is_personal: true, client_id: 1, journal_ref_id: tid });
+  // The orders as the page last saw them: two have had their price changed since, which the fee meter counts.
+  const orderLog = {};
+  for (const o of orders) orderLog[o.order_id] = { i: Date.parse(o.issued), p: o.price };
+  for (const o of [orders.find(x => x.type_id === 527), orders.find(x => x.type_id === 12058)]) orderLog[o.order_id] = { i: Date.parse(o.issued) - 20 * H, p: Math.round(o.price * 0.994 / 1000) * 1000 };
 
   // planetary products on sale at every hub
   [[ST.hek, 9150], [ST.rens, 9420], [ST.dodixie, 8870], [ST.amarr, 9010], [ST.jita, 8640]].forEach(([loc, px]) => rival(REGION[loc], 2329, loc, false, px, 5200, 6 * H));
@@ -203,6 +225,7 @@
     if (/\/assets\/$/.test(path)) return answer([
       { item_id: 1, type_id: 527, quantity: 60, location_id: ST.jita, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 2, type_id: 2329, quantity: 1200, location_id: ST.hek, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
+      { item_id: 7, type_id: 3244, quantity: 120, location_id: ST.jita, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 3, type_id: 12733, quantity: 1, location_id: ST.hek, location_type: 'station', location_flag: 'Hangar', is_singleton: true },
       // in the hold of the ship being flown: one item that sells best where the ship is docked, one that sells best elsewhere, and ammunition that is not traded
       { item_id: 4, type_id: 2048, quantity: 30, location_id: 3, location_type: 'item', location_flag: 'Cargo', is_singleton: false },
@@ -229,6 +252,10 @@
       const base = { 30744: 4000, 30745: 900, 30746: 300, 25624: 600, 30259: 1500, 30377: 9000, 30378: 5000, 20424: 2500 }[q.type_id];
       const mult = { 10000002: 1, 10000043: 0.2, 10000032: 0.08, 10000042: 0.05, 10000030: 0.002 }[m[1]] || 0;
       return answer([1, 2, 3, 4, 5, 6, 7].map(i => ({ date: iso(i * D).slice(0, 10), average: lootOf.get(Number(q.type_id))[3], highest: 0, lowest: 0, order_count: 5, volume: Math.round(base * mult) })).filter(x => x.volume).reverse(), D);
+    }
+    if ((m = path.match(/\/markets\/(\d+)\/history\/$/)) && fresh[q.type_id]) {
+      const hub = Object.keys(ST).find(k => REGION[ST[k]] === Number(m[1])), f = fresh[q.type_id][hub];
+      return answer(f ? Array.from({ length: 30 }, (_, i) => ({ date: iso((30 - i) * D).slice(0, 10), average: f[1], highest: f[1], lowest: f[1], order_count: 9, volume: f[2] })) : [], D);
     }
     if ((m = path.match(/\/markets\/(\d+)\/history\/$/))) return answer([1, 2, 3, 4, 5, 6, 7, 8].map(i => ({ date: iso(i * D).slice(0, 10), average: 1540000 + i * 2100, highest: 1560000, lowest: 1500000, order_count: 9, volume: 20 + i })).reverse(), D);
     if (/\/markets\/prices\/$/.test(path)) return answer([{ type_id: 527, average_price: 884000 }, { type_id: 2329, average_price: 9100 }, { type_id: 12733, average_price: 251400000 }, { type_id: 11188, average_price: 318000000 }].concat(loot.map(x => ({ type_id: x[0], average_price: x[3] }))), 60 * M, 20 * M);
@@ -257,5 +284,5 @@
     return Promise.reject(new window.Esi.EsiError(404, 'Sample data has no answer for ' + path));
   }
 
-  window.Demo = { on, get, post, who: { id: CHAR, name: 'Sample Trader', scopes: [] }, scout: { id: SCOUT, name: 'Sample Scout', scopes: [] } };
+  window.Demo = { on, get, post, orderLog, who: { id: CHAR, name: 'Sample Trader', scopes: [] }, scout: { id: SCOUT, name: 'Sample Scout', scopes: [] } };
 })();

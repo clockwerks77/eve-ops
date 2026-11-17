@@ -25,6 +25,10 @@
     return Math.ceil(c / s) * s / 100;
   }
 
+  /** Largest legal price at or below p, and smallest at or above it. */
+  function tickFloor(p) { return p > 0 && isLegal(p) ? cents(p) / 100 : tickBelow(p); }
+  function tickCeil(p) { return p > 0 && isLegal(p) ? cents(p) / 100 : tickAbove(p); }
+
   // ------------------------------------------------------------- book math
   function levels(orders, dir) {
     const m = new Map();
@@ -313,12 +317,146 @@
     if (o.duration < 90) out.push('Listed for ' + o.duration + (o.duration === 1 ? ' day' : ' days') + ', not 90.');
     if (o.isBuy) {
       if (o.wall != null && o.price >= o.wall * 1.25) out.push(pct(o.price / o.wall - 1) + ' above the next bid. Check for a typo.');
+      // far under the top bid it will not fill, unless the top bid is past what the line supports (o.max), where staying behind is the plan
+      else if (o.behind && o.wall != null && o.price <= o.wall * (1 - o.behind) && !(o.max != null && tickAbove(o.wall) > o.max)) out.push(pct(1 - o.price / o.wall) + ' under the top bid, so it will not fill. A typo, or a bid the market has left behind.');
     } else {
       if (o.front != null && o.price <= o.front * 0.7) out.push(pct(1 - o.price / o.front) + ' under the next seller. Check for a typo.');
       else if (o.front != null && o.price >= o.front * 1.5) out.push(pct(o.price / o.front - 1) + ' above the front. Check for a typo.');
       if (o.cost != null && o.cost > 0 && o.price * o.netMult < o.cost) out.push('Sells below your cost.');
     }
+    // the price copied from the page and the price the order ended up at are far apart: most likely a slip of the keys
+    if (o.copied != null && o.copied > 0 && Math.abs(o.price - o.copied) / o.copied > 0.02) out.push('You copied ' + isk(o.copied) + ' but the order shows ' + isk(o.price) + '.');
     return out;
+  }
+
+  // ------------------------------------------------------------------ risk
+  /**
+   * What a hub is counted as paying for an item you have no sale of on record: the lowest of the ask there now, the last
+   * day's average, the week's average and `spike` times the month's average, so a thin spike in the book does not count.
+   * history: ESI's daily rows for the hub's region, oldest first. The pace is the lower of the week's and the month's units a day.
+   * -> { price, ask, perDay, thin } (price null when there is neither an ask nor a traded day to go on)
+   */
+  function hubRead(ask, history, now, spike) {
+    const rows = history || [], day = r => Date.parse(r.date);
+    const w = rows.filter(r => day(r) >= now - 8 * 864e5), m = rows.filter(r => day(r) >= now - 31 * 864e5);   // the newest day is published a day late
+    const vw = sum(w, r => r.volume), vm = sum(m, r => r.volume);
+    const marks = [];
+    if (ask != null) marks.push(ask);
+    if (vw) { marks.push(w[w.length - 1].average); marks.push(sum(w, r => r.average * r.volume) / vw); }
+    if (vm) marks.push((spike || 1.15) * sum(m, r => r.average * r.volume) / vm);
+    const price = marks.length ? Math.min.apply(null, marks) : null;
+    return { price, ask: ask == null ? null : ask, perDay: Math.min(vw / 7, vm / 30), thin: ask != null && price != null && price < ask * 0.95 };
+  }
+
+  /**
+   * Where a line goes, and the most a bid on it may be.
+   * hubs: [{ name, station, price (what the hub is counted as paying), perDay (the pace it is weighted by) }]
+   * o: { cost (unit cost, or the bid), buyFee (the broker's share on a bid still to fill, else 0), netMult, floor, margin, top }
+   * The line goes to the hubs that net `floor` or better at this cost: the best pace of profit first, `top` of them at most, shared out by pace.
+   * `max` is the highest bid that still leaves `margin` across those hubs. With no hub at the floor the state is 'under', and the figures
+   * are for the best hubs there are; with no hub read at all it is 'unknown'.
+   * -> { state, hubs: [{ name, station, price, perDay, net, margin, share }], blend, net, margin, max }
+   */
+  function destPlan(hubs, o) {
+    const fee = o.buyFee || 0, cost = o.cost * (1 + fee), top = o.top || 3;
+    const all = (hubs || []).filter(x => x.price != null && x.price > 0).map(x => {
+      const net = x.price * o.netMult - cost;
+      return Object.assign({}, x, { net, margin: cost > 0 ? net / cost : null, pace: Math.max(x.perDay || 0, 0) });
+    });
+    if (!all.length) return { state: 'unknown', hubs: [], blend: null, net: null, margin: null, max: null };
+    const ok = all.filter(x => x.net >= o.floor * cost);
+    const pick = (ok.length ? ok : all).sort((a, b) => b.pace * Math.max(b.net, 0) - a.pace * Math.max(a.net, 0) || b.price - a.price).slice(0, top);
+    let total = sum(pick, x => x.pace);
+    if (!(total > 0)) { pick.forEach(x => { x.pace = 1; }); total = pick.length; }       // no pace known: equal shares
+    pick.forEach(x => { x.share = x.pace / total; });
+    const blend = sum(pick, x => x.share * x.price * o.netMult), net = blend - cost;
+    return { state: ok.length ? 'ok' : 'under', hubs: pick, blend, net, margin: cost > 0 ? net / cost : null, max: tickFloor(blend / ((1 + o.margin) * (1 + fee))) };
+  }
+
+  /** `qty` whole units shared out by the hubs' shares, adding up exactly: the odd units go to the largest remainders. -> [{ name, units }] */
+  function splitUnits(qty, hubs) {
+    const rows = (hubs || []).map(x => { const exact = qty * (x.share || 0); return { name: x.name, units: Math.floor(exact), rest: exact - Math.floor(exact) }; });
+    let left = qty - sum(rows, r => r.units);
+    for (const r of rows.slice().sort((a, b) => b.rest - a.rest)) { if (left <= 0) break; r.units++; left--; }
+    return rows.filter(r => r.units > 0).map(r => ({ name: r.name, units: r.units }));
+  }
+
+  /**
+   * A bid's call once the line's plan is known (a destPlan worked out at the bid's own price).
+   *   'pull': no hub nets the floor at this bid any more, so cancel it or lower it.
+   *   'over': the price that would retake the lead is past the max bid, so leave it where it is.
+   */
+  function guardBid(plan, pos, g) {
+    if (!g || g.state === 'unknown' || !pos || pos.status === 'gone') return plan;
+    const pct = x => Math.round(Math.abs(x) * 100) + '%';
+    if (g.state === 'under') return { action: 'hold', kind: 'pull', target: null, fee: 0,
+      reason: (g.margin < 0 ? 'Loses ' : 'Nets ') + pct(g.margin) + ' at today\u2019s hub prices; the most this line supports is ' + isk(g.max) + '. Cancel it or lower it.' };
+    if (plan.target != null && g.max != null && plan.target > g.max) return { action: 'hold', kind: 'over', target: null, fee: 0,
+      reason: 'The top bid, ' + isk(pos.wall) + ', is over your max bid of ' + isk(g.max) + '. Leave it.' };
+    return plan;
+  }
+
+  /**
+   * Whether a line has earned a re-bid.
+   * x: { buys: [{ at, qty }] in the wallet's window, oldest first; sold: units sold in it; margin: net over cost on those sales (null when not known); stock: units still held }
+   * r: { lotDays, half, days, floor }. The first lot is everything bought within `lotDays` of the first purchase.
+   *   'proven': `half` of the first lot has sold, at the floor or better where the cost is known. A line that sells with no purchase in the window was bought before it, and is proven.
+   *   'new': nothing sold yet.  'probation': selling, not there yet.
+   *   'drop': `days` after the first purchase and still not proven, or stock on hand with no purchase and no sale on record at all.
+   * -> { state, sold, lot, first, thin }
+   */
+  function lineStatus(x, r, now) {
+    const buys = x.buys || [], first = buys.length ? buys[0].at : null, sold = x.sold || 0;
+    const lot = first == null ? 0 : sum(buys.filter(b => b.at <= first + r.lotDays * 864e5), b => b.qty);
+    const thin = lot > 0 && x.margin != null && x.margin < r.floor;
+    let state;
+    if (!lot) state = sold > 0 ? 'proven' : x.stock > 0 ? 'drop' : 'new';
+    else if (sold >= lot * r.half && !thin) state = 'proven';
+    else if (now - first > r.days * 864e5) state = 'drop';
+    else state = sold > 0 ? 'probation' : 'new';
+    return { state, sold, lot, first, thin };
+  }
+
+  /**
+   * Price changes made since the orders were last looked at. log: { order_id: { i: issue time, p: price } } from that look.
+   * EVE restamps an order's issue time when its price is changed, so a later issue time at another price is one change
+   * (several between two looks count as one). Each costs `modify` of the order's value, plus the broker's share of any escrow added to a bid.
+   * -> { log (for the next look), changes: [{ id, at, fee }] }
+   */
+  function orderChanges(log, orders, fees) {
+    const next = {}, changes = [];
+    for (const o of orders) {
+      const i = Date.parse(o.issued), was = log && log[o.order_id];
+      if (was && i > was.i && o.price !== was.p) changes.push({ id: o.order_id, at: i,
+        fee: o.price * o.volume_remain * fees.modify + (o.is_buy_order ? Math.max(0, o.price - was.p) * o.volume_remain * fees.broker : 0) });
+      next[o.order_id] = { i, p: o.price };
+    }
+    return { log: next, changes };
+  }
+
+  /**
+   * Committed ISK by where it is headed, against the limits.
+   * lines: [{ isk (a bid's escrow, or stock at cost), proven, hubs: [{ name, share }] or null when no destination is known }]
+   * limits: { reserve (wallet to keep back), unproven (most committed to lines that have not proven themselves), hub (most headed for any one hub) }
+   * -> { total, unproven, hubs: [{ name, isk, over }] largest first, loose, gate: { open, why: [sentences] } }
+   * The gate says whether new lines may be opened; re-bids on proven lines are not its business.
+   */
+  function exposure(lines, wallet, limits) {
+    const by = new Map();
+    let total = 0, unproven = 0, loose = 0;
+    for (const l of lines || []) {
+      if (!(l.isk > 0)) continue;
+      total += l.isk;
+      if (!l.proven) unproven += l.isk;
+      if (!l.hubs || !l.hubs.length) { loose += l.isk; continue; }
+      for (const x of l.hubs) by.set(x.name, (by.get(x.name) || 0) + l.isk * (x.share == null ? 1 / l.hubs.length : x.share));
+    }
+    const hubs = Array.from(by, e => ({ name: e[0], isk: e[1], over: limits.hub != null && e[1] > limits.hub })).sort((a, b) => b.isk - a.isk);
+    const why = [];
+    if (wallet != null && limits.reserve != null && wallet < limits.reserve) why.push('The wallet, ' + short(wallet) + ', is under your reserve of ' + short(limits.reserve) + '.');
+    if (limits.unproven != null && unproven > limits.unproven) why.push('Unproven lines hold ' + short(unproven) + ', over your limit of ' + short(limits.unproven) + '.');
+    for (const x of hubs) if (x.over) why.push(x.name + ' has ' + short(x.isk) + ' headed for it, over your limit of ' + short(limits.hub) + '.');
+    return { total, unproven, hubs, loose, gate: { open: !why.length, why } };
   }
 
   /** Last `days` complete days of a region's price history: volume-weighted price and units a day. */
@@ -656,6 +794,9 @@
       if (t) out.tracker = t;
       const lk = newer(x.lock, y.lock);
       if (lk) out.lock = lk;
+      // price changes counted this week: each device counts what it saw, so the fuller count stands
+      const ux = x.bumps || null, uy = y.bumps || null, bp = !ux ? uy : !uy ? ux : ux.n !== uy.n ? (ux.n > uy.n ? ux : uy) : stable(ux) >= stable(uy) ? ux : uy;
+      if (bp) out.bumps = bp;
       return out;
     };
     const wa = a.weeks || {}, wb = b.weeks || {}, w = {};
@@ -665,6 +806,7 @@
       pins: marks(a.pins, b.pins, keep.pins), copied: marks(a.copied, b.copied, keep.copied),
       seen: seen(a.seen, b.seen),
       costs: newer(a.costs, b.costs),
+      risk: newer(a.risk, b.risk),
       weeks: { carried: newer(wa.carried, wb.carried), w },
     };
   }
@@ -886,8 +1028,9 @@
   }
 
   return {
-    tickBelow, tickAbove, isLegal, levels,
+    tickBelow, tickAbove, tickFloor, tickCeil, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
+    hubRead, destPlan, splitUnits, guardBid, lineStatus, orderChanges, exposure,
     ledger, unitCost, summarize, uncosted, daily, velocity, startOfDay, startOfWeek,
     orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, clock, picketRoll, picketSnooze, campAlerts, nightMarkdown, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
