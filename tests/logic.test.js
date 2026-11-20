@@ -895,3 +895,48 @@ test('sync carries the limits and the week\'s change count', () => {
   assert.deepEqual(ab.weeks.w['2026-11-16'].bumps, { n: 14, fee: 5.1e6 });   // the fuller count
   assert.equal(L.syncMerge(a, {}, 100, keep).risk.at, 5);
 });
+
+test('a load keeps the plan it came aboard with, and counts down as it is listed', () => {
+  const split = n => L.splitUnits(n, [{ name: 'Amarr', share: 0.6 }, { name: 'Dodixie', share: 0.3 }, { name: 'Rens', share: 0.1 }]);
+  const old = { id: 7, hub: 'Amarr', units: 50 };              // an order from an earlier load: not counted
+  let r = L.loadStep(null, { qty: 100, orders: [old], here: null, split });
+  assert.deepEqual(r.left, [{ name: 'Amarr', units: 60 }, { name: 'Dodixie', units: 30 }, { name: 'Rens', units: 10 }]);
+  // prices move on the way: the split would now send everything to Rens, but the load keeps its plan
+  const moved = n => [{ name: 'Rens', units: n }];
+  assert.deepEqual(L.loadStep(r.entry, { qty: 100, orders: [old], here: null, split: moved }).left, r.left);
+  // listed 60 in Amarr: the order list shows it before the cargo does
+  const mine = { id: 8, hub: 'Amarr', units: 60 };
+  r = L.loadStep(r.entry, { qty: 100, orders: [old, mine], here: 'Amarr', split: moved });
+  assert.deepEqual(r.left, [{ name: 'Dodixie', units: 30 }, { name: 'Rens', units: 10 }]);
+  assert.equal(r.waiting, 60);
+  // then the cargo catches up, and nothing is taken off twice
+  r = L.loadStep(r.entry, { qty: 40, orders: [old, mine], here: null, split: moved });
+  assert.deepEqual(r.left, [{ name: 'Dodixie', units: 30 }, { name: 'Rens', units: 10 }]);
+  assert.equal(r.waiting, 0);
+  // the Amarr order sells out and leaves the order list: the 60 stay counted
+  r = L.loadStep(r.entry, { qty: 40, orders: [old], here: null, split: moved });
+  assert.deepEqual(r.left, [{ name: 'Dodixie', units: 30 }, { name: 'Rens', units: 10 }]);
+  // the same input twice gives the same answer
+  assert.deepEqual(L.loadStep(r.entry, { qty: 40, orders: [old], here: null, split: moved }), r);
+});
+
+test('units that leave the hold unexplained come off the hub you are in, then the largest share', () => {
+  const split = n => L.splitUnits(n, [{ name: 'Hek', share: 0.5 }, { name: 'Rens', share: 0.5 }]);
+  let r = L.loadStep(null, { qty: 40, orders: [], here: null, split });
+  // the cargo drops by 25 while docked in Hek, before any order shows: 20 off Hek, 5 off Rens
+  r = L.loadStep(r.entry, { qty: 15, orders: [], here: 'Hek', split });
+  assert.deepEqual(r.left, [{ name: 'Rens', units: 15 }]);
+  // the Hek order of 25 then shows: it explains what was taken off, and nothing more comes off
+  const hek = { id: 1, hub: 'Hek', units: 25 };
+  r = L.loadStep(r.entry, { qty: 15, orders: [hek], here: 'Hek', split });
+  assert.deepEqual(r.left, [{ name: 'Rens', units: 15 }]);
+  assert.deepEqual(r.entry.t, {});
+  // more of the same item comes aboard: only the new units are shared out
+  r = L.loadStep(r.entry, { qty: 35, orders: [hek], here: null, split });
+  assert.deepEqual(r.left, [{ name: 'Rens', units: 25 }, { name: 'Hek', units: 10 }]);
+  // listing more at a hub than its share takes the rest off the largest other share
+  r = L.loadStep(r.entry, { qty: 35, orders: [hek, { id: 2, hub: 'Hek', units: 14 }], here: 'Hek', split });
+  assert.deepEqual(r.left, [{ name: 'Rens', units: 21 }]);
+  // an item with nowhere to go is kept as "nowhere yet"
+  assert.deepEqual(L.loadStep(null, { qty: 5, orders: [], here: null, split: () => [] }).left, [{ name: '', units: 5 }]);
+});

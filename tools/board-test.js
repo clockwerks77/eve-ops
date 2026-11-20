@@ -59,6 +59,7 @@ const { serve, playwright, chrome, midweek } = require('./serve.js');
   const hold = page.locator('#hold');
   ok('the hold lists traded items only, and where each sells best', await hold.locator('tbody tr').count() === 2 && /Warrior II/.test(await hold.innerText()) && !/Item 21898/.test(await hold.innerText()));
   ok('in Dodixie the item that sells best there is marked "Here"', /Here/.test(await hold.locator('tbody tr', { hasText: 'Warrior II' }).innerText()) && /1 item to list here/.test(await hold.innerText()));
+  ok('the hold says what is aboard for each hub, and each item how many units go where', /Aboard for: .*Hek 30 m³/.test((await hold.locator('.hold-by').innerText()).replace(/\s+/g, ' ')) && /Here 120/.test(await hold.locator('tbody tr', { hasText: 'Warrior II' }).innerText()) && /Hek 30/.test(await hold.locator('tbody tr', { hasText: 'Damage Control II' }).innerText()));
   await page.locator('.tab', { hasText: 'Hek' }).click(); await page.waitForTimeout(200);
   const dc = hold.locator('tbody tr', { hasText: 'Damage Control II' });
   ok('in Hek the listing price follows the call on the order already there', (await dc.locator('.price').innerText()) === '1,419,000' && /big move on your order here/.test(await dc.innerText()) && await dc.locator('.price.is-soft').count() === 1);

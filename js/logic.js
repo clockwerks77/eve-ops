@@ -391,6 +391,39 @@
   }
 
   /**
+   * The plan a load travels with: where the units of one item in the hold are to be listed, fixed when they come aboard
+   * and counted down as they are listed, so the hold empties over the stops and a price moving mid-trip does not re-route it.
+   * entry: what was kept last time, or null: { q (units aboard when last seen), left: { hub: units still to list there },
+   *        t: { hub: units that left the hold there with no order yet to explain them }, ids: [your sell orders for the item, as last seen] }
+   * o: { qty (units aboard now), orders: [{ id, hub, units }] (your sell orders for the item now, at their full size), here (the hub you are
+   *      docked in, or null), split(units) -> [{ name, units }] (where units coming aboard now would go; '' is "nowhere yet") }
+   * A new order comes off its hub's share (then off the largest), unless it explains units already taken off. Units that come aboard are
+   * shared out by `split`. Units that leave the hold with no new order come off the hub you are docked in first, then off the largest share.
+   * EVE reports orders before cargo, and either can arrive first: nothing is taken off twice, and the same input twice changes nothing.
+   * -> { entry, left: [{ name, units }] (largest first), waiting (units aboard that the order list already shows as listed) }
+   */
+  function loadStep(entry, o) {
+    const fresh = !entry, e = { q: fresh ? 0 : entry.q || 0, left: Object.assign({}, fresh ? null : entry.left), t: Object.assign({}, fresh ? null : entry.t), ids: fresh ? null : (entry.ids || []).slice() };
+    const orders = o.orders || [], known = new Set(e.ids || orders.map(x => x.id));      // orders already up when the item comes aboard are not this load
+    const biggest = (m, first) => (first != null && m[first] > 0 ? first : Object.keys(m).filter(k => m[k] > 0).sort((x, y) => m[y] - m[x] || (x < y ? -1 : 1))[0]);
+    const take = (m, first, n) => { while (n > 0) { const k = biggest(m, first); if (k == null) break; const d = Math.min(n, m[k]); m[k] -= d; n -= d; } return n; };
+    for (const x of orders) if (!known.has(x.id)) take(e.left, x.hub, take(e.t, x.hub, x.units));
+    e.ids = orders.map(x => x.id);
+    const added = Math.max(0, o.qty - e.q);
+    if (added) {
+      let placed = 0;
+      for (const p of (o.split ? o.split(added) : []) || []) if (p.units > 0) { e.left[p.name || ''] = (e.left[p.name || ''] || 0) + p.units; placed += p.units; }
+      if (placed < added) e.left[''] = (e.left[''] || 0) + added - placed;
+    }
+    e.q = o.qty;
+    let over = sum(Object.keys(e.left), k => e.left[k]) - o.qty;
+    while (over > 0) { const k = biggest(e.left, o.here); const d = Math.min(over, e.left[k]); e.left[k] -= d; e.t[k] = (e.t[k] || 0) + d; over -= d; }
+    for (const m of [e.left, e.t]) for (const k of Object.keys(m)) if (!(m[k] > 0)) delete m[k];
+    const left = Object.keys(e.left).map(k => ({ name: k, units: e.left[k] })).sort((x, y) => y.units - x.units || (x.name < y.name ? -1 : 1));
+    return { entry: e, left, waiting: Math.max(0, o.qty - sum(left, x => x.units)) };
+  }
+
+  /**
    * A bid's call once the line's plan is known (a destPlan worked out at the bid's own price).
    *   'pull': no hub nets the floor at this bid any more, so cancel it or lower it.
    *   'over': the price that would retake the lead is past the max bid, so leave it where it is.
@@ -1039,7 +1072,7 @@
   return {
     tickBelow, tickAbove, tickFloor, tickCeil, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
-    hubRead, spikeCap, destPlan, splitUnits, guardBid, lineStatus, orderChanges, exposure,
+    hubRead, spikeCap, destPlan, splitUnits, loadStep, guardBid, lineStatus, orderChanges, exposure,
     ledger, unitCost, summarize, uncosted, daily, velocity, startOfDay, startOfWeek,
     orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, clock, picketRoll, picketSnooze, campAlerts, nightMarkdown, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,
