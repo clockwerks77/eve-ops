@@ -120,7 +120,7 @@
     feeds: {}, ready: false, running: false, notice: null,
     pins: (!demo && E.store.get('eveops.pins')) || {}, copied: (!demo && E.store.get('eveops.copied')) || {}, legs: {}, openCalls: new Set(), journal: null, costs: (!demo && E.store.get('eveops.costs')) || null, costDraft: null, costNote: null, notify: Object.assign({ change: false, extractors: false, launchpad: false }, E.store.get('eveops.notify')), notifyAllowed: null, weeks: Object.assign({ carried: null, w: {} }, !demo && E.store.get('eveops.weeks')), fold: (!demo && E.store.get('eveops.fold')) || {}, tripSkip: new Set(), tripSafe: !demo && !!(E.store.get('eveops.trip') || {}).safe, tripOpen: (() => { const t = !demo && E.store.get('eveops.trip'); return t && t.open != null ? !!t.open : window.matchMedia('(min-width: 49rem)').matches; })(), wantWake: false, wake: null,
     prices: new Map(), tab: null, follow: true, view: !location.hash && window.Ex && window.Ex.campOpen() ? 'ex' : viewOf(location.hash), hist: new Map(), piNear: null, piFrom: null, history: [], scout: null, lootBooks: new Map(), lootVol: new Map(), lootSig: '', lootAt: 0, lootJumps: {},
-    seen: (!demo && E.store.get('eveops.seen')) || null, load: (!demo && E.store.get('eveops.load')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo,
+    seen: (!demo && E.store.get('eveops.seen')) || null, load: (!demo && E.store.get('eveops.load')) || null, cargo: (!demo && E.store.get('eveops.cargo')) || C.haul.cargo, haulTo: (!demo && E.store.get('eveops.haulTo')) || [],
     reads: new Map(), riskSet: (!demo && E.store.get('eveops.risk')) || null,
   };
   /** The four limits of the safeguards: the page's defaults, with whatever has been set here (or on another device) over them. */
@@ -891,9 +891,30 @@
       return { asks, best: planned ? planned.hubs[0].name : top ? top.name : null,
         split: planned && planned.state === 'ok' && planned.hubs.length > 1 ? L.splitUnits(qty, planned.hubs) : null, under: !!planned && planned.state === 'under', fresh: !!planned && !planned.sold };
     };
+    /** What to list units of an item at in a hub, by the same judgement as the Call column: follow your order for it there if you have one, else the book. */
+    const listAt = (type, qty, hb) => {
+      const st = list.find(x => x.id === hb.station), front = ask(type, hb), c = costFor(type, qty, hb.station), js = jitaSell(type);
+      const mine = st ? st.sells.filter(r => r.type === type && r.plan.action !== 'none').sort((a, b) => a.price - b.price)[0] : null;
+      let price = null, why = 'no one is selling it here', soft = false;
+      if (mine && mine.plan.action === 'tick') { price = mine.plan.target; why = 'the price your order here should move to'; }
+      else if (mine && mine.plan.action === 'optional') { price = mine.plan.target; soft = true; why = { big: 'big move on your order here: your call', sniper: 'sniper under your order here: your call', slow: 'slow line here: your call' }[mine.plan.kind] || 'your call'; }
+      else if (mine && mine.pos && mine.pos.status === 'leading') { price = mine.price; why = 'matches your order here'; }
+      else if (mine) why = String(mine.plan.reason || 'Hold.').replace(/\.$/, '').replace(/^./, x => x.toLowerCase());
+      else if (front != null && c && front * NET <= c.cost) why = 'front is below your cost';
+      else if (front != null && hb.station !== C.jita.station && js != null && front <= js) why = 'front is at or below the Jita sell price';
+      else if (front != null && c && c.cost > 0 && L.tickBelow(front) * NET - c.cost < R.floor * c.cost) why = 'one step under the front nets under ' + Math.round(R.floor * 100) + '%; your floor is ' + L.isk(L.tickCeil(c.cost * (1 + R.floor) / NET));
+      else if (front != null) { price = L.tickBelow(front); why = 'front is ' + L.isk(front); }
+      const net = price != null && c ? price * NET - c.cost : null;
+      const mk = S.copied['g' + type + ':' + hb.station];
+      return { price, net, soft, why, margin: net != null && c.cost > 0 ? net / c.cost : null,
+        copied: mk && !mk.gone ? { state: 'waiting', price: mk.price, at: mk.at, moved: price != null && mk.price !== price } : null };
+    };
     const haulRows = Array.from(jitaHang, e => {
       const c = costFor(e[0], e[1]), unit = c ? c.cost : null, d = destOf(e[0], e[1], unit);
-      return { type: e[0], name: nameOf(e[0]), qty: e[1], m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks: d.asks, best: d.best, split: d.split, under: d.under, fresh: d.fresh,
+      // where its units go, and what to list them at there (the same price the cargo hold will offer once they are aboard)
+      const parts = d.split || (d.best ? [{ name: d.best, units: e[1] }] : []), listing = {};
+      for (const p of parts) { const hb = away.find(x => x.name === p.name); if (hb) listing[p.name] = listAt(e[0], e[1], hb); }
+      return { type: e[0], name: nameOf(e[0]), qty: e[1], each: (K.types[e[0]] || {}).v || 0, m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks: d.asks, best: d.best, split: d.split, under: d.under, fresh: d.fresh, parts, list: listing,
         unit, value: unit != null ? unit * e[1] : null, floor: unit > 0 ? L.tickCeil(unit * (1 + R.floor) / NET) : null, status: statusOf(e[0]).state, thinLine: statusOf(e[0]).thin };
     }).sort((a, b) => a.name.localeCompare(b.name));
     const haul = { rows: haulRows, units: sum(haulRows, r => r.qty), m3: sum(haulRows, r => r.m3), cargo: S.cargo, value: sum(haulRows, r => r.value || 0), unpriced: haulRows.filter(r => r.value == null).length, cap: lim.trip };
@@ -911,24 +932,7 @@
       loadNow[e[0]] = step.entry;
       const left = step.left.filter(x => x.name), best = left.length ? { name: (left.find(x => x.name === dockedHub) || left[0]).name } : null;
       const listing = {};
-      for (const hb of C.hubs) {
-        // The same judgement as the Call column: follow your order for this item here if you have one, else the book.
-        const st = list.find(x => x.id === hb.station), front = ask(e[0], hb), c = costFor(e[0], e[1], hb.station), js = jitaSell(e[0]);
-        const mine = st ? st.sells.filter(r => r.type === e[0] && r.plan.action !== 'none').sort((a, b) => a.price - b.price)[0] : null;
-        let price = null, why = 'no one is selling it here', soft = false;
-        if (mine && mine.plan.action === 'tick') { price = mine.plan.target; why = 'the price your order here should move to'; }
-        else if (mine && mine.plan.action === 'optional') { price = mine.plan.target; soft = true; why = { big: 'big move on your order here: your call', sniper: 'sniper under your order here: your call', slow: 'slow line here: your call' }[mine.plan.kind] || 'your call'; }
-        else if (mine && mine.pos && mine.pos.status === 'leading') { price = mine.price; why = 'matches your order here'; }
-        else if (mine) why = String(mine.plan.reason || 'Hold.').replace(/\.$/, '').replace(/^./, x => x.toLowerCase());
-        else if (front != null && c && front * NET <= c.cost) why = 'front is below your cost';
-        else if (front != null && hb.station !== C.jita.station && js != null && front <= js) why = 'front is at or below the Jita sell price';
-        else if (front != null && c && c.cost > 0 && L.tickBelow(front) * NET - c.cost < R.floor * c.cost) why = 'one step under the front nets under ' + Math.round(R.floor * 100) + '%; your floor is ' + L.isk(L.tickCeil(c.cost * (1 + R.floor) / NET));
-        else if (front != null) { price = L.tickBelow(front); why = 'front is ' + L.isk(front); }
-        const net = price != null && c ? price * NET - c.cost : null;
-        const mk = S.copied['g' + e[0] + ':' + hb.station];
-        listing[hb.station] = { price, net, soft, why, margin: net != null && c.cost > 0 ? net / c.cost : null,
-          copied: mk && !mk.gone ? { state: 'waiting', price: mk.price, at: mk.at, moved: price != null && mk.price !== price } : null };
-      }
+      for (const hb of C.hubs) listing[hb.station] = listAt(e[0], e[1], hb);
       const c0 = costFor(e[0], e[1]);
       return { type: e[0], name: nameOf(e[0]), qty: e[1], m3: e[1] * ((K.types[e[0]] || {}).v || 0), asks, best: best ? best.name : null, left, waiting: step.waiting, list: listing, value: c0 ? c0.cost * e[1] : null };
     }).sort((a, b) => a.name.localeCompare(b.name));
@@ -942,6 +946,23 @@
     const unitM3 = t => (K.types[t] || {}).v || 0, holdBy = new Map();
     for (const r of holdRows) for (const x of r.left) { const b = holdBy.get(x.name) || { name: x.name, units: 0, m3: 0, items: 0 }; b.units += x.units; b.m3 += x.units * unitM3(r.type); b.items++; holdBy.set(x.name, b); }
     const hold = { by: away.map(hb => holdBy.get(hb.name)).filter(Boolean), nowhere: holdRows.filter(r => !r.left.length && !r.waiting).length, rows: holdRows, units: sum(holdRows, r => r.qty), m3: sum(holdRows, r => r.m3), at: (S.feeds.Hangars || {}).at || 0, ship: S.ship ? nameOf(S.ship.ship_type_id) : '', value: sum(holdRows, r => r.value || 0), unpriced: holdRows.filter(r => r.value == null).length, cap: lim.trip };
+
+    // ---- load list: the hubs picked on the manifest, and what to take out of the Jita hangar for them, fitted to the room left in the hold
+    const haulTo = away.map(hb => hb.name).filter(n => S.haulTo.indexOf(n) >= 0);
+    haul.hubs = away.map(hb => { const rows = haulRows.filter(r => r.parts.some(p => p.name === hb.name)); return { name: hb.name, on: haulTo.indexOf(hb.name) >= 0, lines: rows.length, m3: sum(rows, r => r.each * sum(r.parts.filter(p => p.name === hb.name), p => p.units)) }; });
+    haul.nowhere = haulRows.filter(r => !r.parts.length).length;
+    if (haulTo.length) {
+      const lines = haulRows.map(r => {
+        const mine = r.parts.filter(p => haulTo.indexOf(p.name) >= 0), units = sum(mine, p => p.units);
+        // what a unit should bring at its hub: the list price there, or what the item trades at where the front is a thin listing
+        const gainAt = p => { const a = r.asks.find(x => x.name === p.name), at = r.list[p.name]; return a && a.thin && r.unit != null ? a.counts * NET - r.unit : at ? at.net : null; };
+        const priced = mine.filter(p => gainAt(p) != null), n = sum(priced, p => p.units);
+        return { row: r, parts: mine, units, m3: r.each, cost: r.unit, gain: n ? sum(priced, p => p.units * gainAt(p)) / n : null };
+      }).filter(x => x.units > 0);
+      const room = Math.max(0, S.cargo - hold.m3), fit = L.loadFit(lines, room, Math.max(0, lim.trip - hold.value));
+      haul.load = { to: haulTo, room, aboard: hold.m3, m3: fit.m3, value: fit.value, units: fit.units, left: fit.left, want: sum(lines, x => x.units * x.m3), other: haulRows.length - lines.length,
+        rows: fit.rows.map(f => Object.assign({}, lines[f.i], f)) };
+    } else haul.load = null;
 
     // ---- exposure: every committed ISK by the hub it is headed for, against the limits
     const exLines = [];
@@ -1314,6 +1335,7 @@
       s.bids.length ? h('div', { class: 'rows' }, head(['Buy orders', 'Filled', 'Your bid', 'Bids above you', 'Call', 'Type this', 'In escrow', 'Expires']), s.bids.map(bidRow)) : null,
       s.id === C.jita.station && m.haul.rows.length ? haulView(m) : null,
       m.hold.rows.length ? holdView(m, s) : null,
+      s.id !== C.jita.station && m.haul.rows.length ? haulView(m) : null,
       s.id === C.jita.station && m.restock.length ? restockView(m) : null,
       s.hangar.length && s.id !== C.jita.station ? h('p', { class: 'hangar' }, h('span', { class: 'hangar-label' }, 'In the hangar, not listed'),
         s.hangar.map(x => h('span', { class: 'hangar-item' }, x.name + ' ×' + num(x.qty)))) : null);
@@ -1394,7 +1416,25 @@
   }
   const worth = x => L.short(x.value) + ' at cost' + (x.unpriced ? ', ' + plural(x.unpriced, 'item') + ' with no cost on record' : '');
   function haulView(m) {
-    const hl = m.haul, over = hl.m3 > hl.cargo, rich = hl.value > hl.cap;
+    const hl = m.haul, ld = hl.load, over = hl.m3 > hl.cargo, rich = hl.value > hl.cap, pct = Math.round(C.risk.floor * 100);
+    const byName = new Map(C.hubs.map(hb => [hb.name, hb.station]));
+    const setTo = names => { S.haulTo = names; if (!demo) E.store.set('eveops.haulTo', names); paint(); };
+    const toggle = name => setTo(hl.hubs.filter(x => (x.name === name ? !x.on : x.on)).map(x => x.name));
+    // a hub's cell: where units of the row are headed, the price to list them at is a button to copy, as in the Type this column
+    const hubCell = (r, a, mine) => {
+      const at = mine ? r.list[a.name] : null, shown = a.ask == null ? '' : a.thin ? h('span', { class: 'thin', title: 'A thin listing far above what this trades at there: counted at ' + L.isk(Math.round(a.counts)) }, L.isk(a.ask)) : L.isk(a.ask);
+      const sold = a.sold ? h('span', { class: 'sub' }, 'you sold ' + num(a.sold) + ' this week') : null;
+      if (!at) return h('td', null, shown, sold);
+      // under a thin front the price is your call: the line was planned at what the item trades at there, not at that listing
+      return h('td', { class: 'best' }, at.price != null ? priceMark('g' + r.type + ':' + byName.get(a.name), at.price, at.copied, at.soft || a.thin) : shown,
+        h('span', { class: 'sub' }, at.price == null ? at.why : a.thin ? ['your call: front ', shown, ' is thin'] : 'list at; ' + at.why), sold);
+    };
+    const takeTo = (r, parts) => h('td', { class: 'best' }, parts.length ? parts.map(x => x.name + ' ' + num(x.units)).join(', ') : '',
+      r.under ? h('span', { class: 'sub neg' }, 'no hub nets ' + pct + '%') : r.fresh ? h('span', { class: 'sub' }, 'by what each hub trades') : null);
+    const cost = (v, r) => h('td', null, r.unit == null ? h('span', { class: 'sub' }, 'no cost') : L.short(v));
+    const item = r => h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), r.name));
+    const floor = r => h('td', null, r.floor == null ? '' : L.isk(r.floor));
+    const hubHeads = hl.rows[0].asks.map(a => h('th', null, a.name));
     return h('div', { class: 'block' + (folded('haul') ? ' is-folded' : ''), id: 'haul' },
       h('div', { class: 'block-head' }, foldHead('h3', 'haul', 'Haul manifest'),
         h('span', { class: over ? 'neg' : '' }, plural(hl.units, 'unit') + ', ' + num(Math.round(hl.m3)) + ' m³ of '),
@@ -1403,20 +1443,34 @@
         over && h('span', { class: 'chip chip-check' }, 'Over by ' + num(Math.round(hl.m3 - hl.cargo)) + ' m³'),
         h('span', { class: 'worth' + (rich ? ' neg' : '') }, worth(hl)), capBox(hl.cap),
         rich && h('span', { class: 'chip chip-check' }, 'Over your trip cap by ' + L.short(hl.value - hl.cap) + ': split the load')),
-      folded('haul') ? null : h('div', { class: 'pi-scroll' }, h('table', { class: 'pi-table' },
-        h('thead', null, h('tr', null, h('th', { class: 'l' }, 'In the Jita hangar'), h('th', null, 'Units'), h('th', null, 'm³'), h('th', null, 'At cost'), hl.rows[0].asks.map(a => h('th', null, a.name)), h('th', null, 'Take to'), h('th', null, 'Do not list below'))),
-        h('tbody', null, hl.rows.map(r => h('tr', null,
-          h('td', { class: 'l' }, h('span', { class: 'pi-item' }, icon(r.type), r.name)),
-          h('td', null, num(r.qty)), h('td', null, num(Math.round(r.m3))),
-          h('td', null, r.value == null ? h('span', { class: 'sub' }, 'no cost') : L.short(r.value)),
-          r.asks.map(a => h('td', { class: a.name === r.best ? 'best' : '' },
-            a.ask == null ? '' : a.thin ? h('span', { class: 'thin', title: 'A thin listing far above what this trades at there: counted at ' + L.isk(Math.round(a.counts)) }, L.isk(a.ask)) : L.isk(a.ask),
-            a.sold ? h('span', { class: 'sub' }, 'you sold ' + num(a.sold) + ' this week') : null)),
-          h('td', { class: 'best' }, r.split ? r.split.map(x => x.name + ' ' + num(x.units)).join(', ') : r.best || '',
-            r.under ? h('span', { class: 'sub neg' }, 'no hub nets ' + Math.round(C.risk.floor * 100) + '%') : r.fresh ? h('span', { class: 'sub' }, 'by what each hub trades') : null),
-          h('td', null, r.floor == null ? '' : L.isk(r.floor))))))),
-      folded('haul') ? null : h('p', { class: 'note' }, 'Hub columns are the lowest ask there now; a dotted one is a thin listing far above what the item trades at, and is not counted. "Take to" prefers a hub where you sold this item in the last 7 days. A line you have not sold yet goes to the hubs that net '
-        + Math.round(C.risk.floor * 100) + '% or better, shared out by what each trades. "Do not list below" is the price that still nets ' + Math.round(C.risk.floor * 100) + '% on what you paid.'));
+      folded('haul') ? null : h('div', { class: 'haul-to', role: 'group', 'aria-label': 'Hubs to load for' }, h('span', { class: 'haul-to-label' }, 'Load for'),
+        hl.hubs.map(x => h('button', { type: 'button', class: 'btn haul-hub', 'aria-pressed': x.on ? 'true' : 'false', disabled: !x.lines && !x.on, title: x.lines ? plural(x.lines, 'line') + ' in the Jita hangar for ' + x.name : 'Nothing in the Jita hangar is for ' + x.name, onclick: () => toggle(x.name) },
+          x.name, h('span', { class: 'sub' }, x.lines ? num(Math.round(x.m3)) + ' m³' : 'nothing'))),
+        ld ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => setTo([]) }, 'Whole manifest') : h('span', { class: 'why' }, 'pick the hubs this trip goes to')),
+      folded('haul') || !ld ? null : h('p', { class: 'hold-by' }, 'For ', h('b', null, ld.to.join(', ')), ': load ', h('b', null, num(ld.units)), ' ' + (ld.units === 1 ? 'unit' : 'units') + ', ' + num(Math.round(ld.m3)) + ' m³ of the ' + num(Math.round(ld.room)) + ' m³ free'
+        + (ld.aboard > 0 ? ' (' + num(Math.round(ld.aboard)) + ' m³ is already aboard)' : '') + ', ' + L.short(ld.value) + ' at cost.',
+        ld.left ? h('span', { class: 'neg' }, ' ' + plural(ld.left, 'line') + ' will not fit whole: ' + num(Math.round(ld.want - ld.m3)) + ' m³ stays in the hangar.') : ' All of it fits.',
+        ld.other ? ' ' + plural(ld.other, 'other line') + ' in the hangar ' + (ld.other === 1 ? 'is' : 'are') + ' for other hubs.' : null),
+      folded('haul') ? null : h('div', { class: 'pi-scroll' }, ld
+        ? h('table', { class: 'pi-table' },
+          h('thead', null, h('tr', null, h('th', { class: 'l' }, 'Load from the Jita hangar'), h('th', null, 'Load'), h('th', null, 'm³'), h('th', null, 'Hold after'), h('th', null, 'At cost'), hubHeads, h('th', null, 'Take to'), h('th', null, 'Do not list below'))),
+          h('tbody', null, ld.rows.map(x => { const r = x.row; return h('tr', { class: x.take ? '' : 'is-left' },
+            item(r),
+            h('td', { class: x.take ? 'best' : '' }, num(x.take), x.take < r.qty ? h('span', { class: 'sub' + (x.short ? ' neg' : '') }, 'of ' + num(r.qty) + (x.short === 'room' ? ': hold is full' : x.short === 'cap' ? ': trip cap' : ' in the hangar')) : null),
+            h('td', null, num(Math.round(x.m3))), h('td', null, x.take ? num(Math.round(x.sum)) : ''),
+            cost(x.value, r),
+            r.asks.map(a => hubCell(r, a, x.parts.some(p => p.name === a.name))),
+            takeTo(r, x.parts), floor(r)); })))
+        : h('table', { class: 'pi-table' },
+          h('thead', null, h('tr', null, h('th', { class: 'l' }, 'In the Jita hangar'), h('th', null, 'Units'), h('th', null, 'm³'), h('th', null, 'At cost'), hubHeads, h('th', null, 'Take to'), h('th', null, 'Do not list below'))),
+          h('tbody', null, hl.rows.map(r => h('tr', null,
+            item(r),
+            h('td', null, num(r.qty)), h('td', null, num(Math.round(r.m3))),
+            cost(r.value, r),
+            r.asks.map(a => hubCell(r, a, r.parts.some(p => p.name === a.name))),
+            takeTo(r, r.parts), floor(r)))))),
+      folded('haul') ? null : h('p', { class: 'note' }, 'Hub columns are the lowest ask there now; a dotted one is a thin listing far above what the item trades at, and is not counted. In the hub a line is headed for, the price is the one to list it at there, by the same rules as the Call column; press it to copy it, and the mark is the same one the cargo hold shows once the stock is aboard. "Take to" prefers a hub where you sold this item in the last 7 days. A line you have not sold yet goes to the hubs that net '
+        + pct + '% or better, shared out by what each trades. "Do not list below" is the price that still nets ' + pct + '% on what you paid. Pick hubs under "Load for" and the list becomes what to take out of the hangar for them, the most ISK per m³ first, until the hold (less what is already aboard) or the trip cap is full.'));
   }
   /** What is in the ship's cargo hold, where each item sells, and the price to list it at in the hub this panel is for. */
   function holdView(m, s) {

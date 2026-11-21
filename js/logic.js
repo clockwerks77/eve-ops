@@ -424,6 +424,35 @@
   }
 
   /**
+   * What to load for the hubs chosen, fitted to the room in the hold and to the trip cap.
+   * lines: [{ units, m3 (each), cost (each, or null), gain (ISK each expected at the hub after fees and cost, or null) }]
+   * room: m3 free in the hold. cap: ISK at cost still free under the trip cap (Infinity for none).
+   * The most ISK per m3 goes aboard first; lines with no price to go by come after those, smallest first. A line that does not
+   * fit whole is loaded in part, and the lines after it are still tried, so a small item can take the room a large one could not.
+   * -> { rows: [{ i (index into lines), take, m3, value, sum (m3 aboard after this line), short: null | 'room' | 'cap' }] in loading order,
+   *      m3, value, units, left (lines not loaded whole) }
+   */
+  function loadFit(lines, room, cap) {
+    const per = x => (x.gain == null ? null : x.m3 > 0 ? x.gain / x.m3 : Infinity);
+    const order = lines.map((x, i) => i).sort((a, b) => {
+      const pa = per(lines[a]), pb = per(lines[b]);
+      if ((pa == null) !== (pb == null)) return pa == null ? 1 : -1;
+      if (pa != null && pa !== pb) return pb - pa;
+      return lines[a].units * lines[a].m3 - lines[b].units * lines[b].m3 || a - b;
+    });
+    let space = Math.max(0, room || 0), isk = cap == null ? Infinity : Math.max(0, cap), m3 = 0, value = 0, units = 0, left = 0;
+    const rows = order.map(i => {
+      const x = lines[i];
+      const byRoom = x.m3 > 0 ? Math.floor(space / x.m3 + 1e-9) : x.units, byCap = x.cost > 0 && isFinite(isk) ? Math.floor(isk / x.cost + 1e-9) : x.units;
+      const take = Math.max(0, Math.min(x.units, byRoom, byCap));
+      const short = take >= x.units ? null : byRoom <= byCap ? 'room' : 'cap';
+      space -= take * x.m3; isk -= take * (x.cost || 0); m3 += take * x.m3; value += take * (x.cost || 0); units += take; if (short) left++;
+      return { i, take, m3: take * x.m3, value: take * (x.cost || 0), sum: m3, short };
+    });
+    return { rows, m3, value, units, left };
+  }
+
+  /**
    * A bid's call once the line's plan is known (a destPlan worked out at the bid's own price).
    *   'pull': no hub nets the floor at this bid any more, so cancel it or lower it.
    *   'over': the price that would retake the lead is past the max bid, so leave it where it is.
@@ -1072,7 +1101,7 @@
   return {
     tickBelow, tickAbove, tickFloor, tickCeil, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
-    hubRead, spikeCap, destPlan, splitUnits, loadStep, guardBid, lineStatus, orderChanges, exposure,
+    hubRead, spikeCap, destPlan, splitUnits, loadStep, loadFit, guardBid, lineStatus, orderChanges, exposure,
     ledger, unitCost, summarize, uncosted, daily, velocity, startOfDay, startOfWeek,
     orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, clock, picketRoll, picketSnooze, campAlerts, nightMarkdown, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,

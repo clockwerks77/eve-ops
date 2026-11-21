@@ -920,6 +920,29 @@ test('a load keeps the plan it came aboard with, and counts down as it is listed
   assert.deepEqual(L.loadStep(r.entry, { qty: 40, orders: [old], here: null, split: moved }), r);
 });
 
+test('a load list is fitted to the room in the hold and the trip cap, the most ISK per m3 first', () => {
+  const lines = [
+    { units: 100, m3: 5, cost: 1e6, gain: 100000 },      // 20,000 ISK per m3
+    { units: 10, m3: 10, cost: 2e6, gain: 500000 },      // 50,000 ISK per m3: goes aboard first
+    { units: 50, m3: 1, cost: 1000, gain: null },        // no price to go by: last
+  ];
+  // everything fits
+  let f = L.loadFit(lines, 1000, Infinity);
+  assert.deepEqual(f.rows.map(r => [r.i, r.take, r.short]), [[1, 10, null], [0, 100, null], [2, 50, null]]);
+  assert.deepEqual([f.m3, f.units, f.left, f.rows[1].sum], [650, 160, 0, 600]);
+  // a hold with 320 m3 free: the dense line whole, 44 of the next, and the small line still takes the room left over
+  f = L.loadFit(lines, 322, Infinity);
+  assert.deepEqual(f.rows.map(r => [r.i, r.take, r.short]), [[1, 10, null], [0, 44, 'room'], [2, 2, 'room']]);
+  assert.deepEqual([f.m3, f.left], [322, 2]);
+  // the trip cap stops a line before the hold does
+  f = L.loadFit(lines, 1000, 25.05e6);
+  assert.deepEqual(f.rows.map(r => [r.i, r.take, r.short]), [[1, 10, null], [0, 5, 'cap'], [2, 50, null]]);
+  assert.equal(f.value, 25e6 + 50000);
+  // no room at all loads nothing, and an item with no volume on record is not held back by it
+  assert.deepEqual(L.loadFit(lines, 0, Infinity).rows.map(r => r.take), [0, 0, 0]);
+  assert.equal(L.loadFit([{ units: 7, m3: 0, cost: null, gain: 5 }], 0, 0).rows[0].take, 7);
+});
+
 test('units that leave the hold unexplained come off the hub you are in, then the largest share', () => {
   const split = n => L.splitUnits(n, [{ name: 'Hek', share: 0.5 }, { name: 'Rens', share: 0.5 }]);
   let r = L.loadStep(null, { qty: 40, orders: [], here: null, split });

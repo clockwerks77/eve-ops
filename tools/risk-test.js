@@ -62,6 +62,34 @@ const { serve, playwright, chrome, midweek } = require('./serve.js');
   await cap.fill('1B'); await cap.press('Enter'); await page.waitForTimeout(200);
   ok('and under it, it does not', !/Over your trip cap/.test(await haul.locator('.block-head').innerText()) && (await cap.inputValue()) === '1.00B');
 
+  // ---- the manifest's list prices and its load list
+  ok('where a line is headed, the price to list it at is a button', (await line.locator('.price').count()) === 3 && /list at; front is/.test(cells.join(' ')), cells.join(' | '));
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const first = line.locator('.price').first(), typed = await first.innerText();
+  await first.click(); await page.waitForTimeout(250);
+  ok('pressing it copies the price and marks it', await line.locator('.price.is-done').count() === 1 && (await page.evaluate(() => navigator.clipboard.readText())) === typed.replace(/,/g, ''));
+  await line.locator('.tag').first().click(); await page.waitForTimeout(150);
+  const heads = async () => (await haul.locator('thead th').allInnerTexts()).join(' | ');
+  await haul.locator('.haul-hub', { hasText: 'Hek' }).click(); await page.waitForTimeout(200);
+  const loadSaid = async () => (await haul.locator('.hold-by').innerText()).replace(/\s+/g, ' ');
+  ok('picking a hub turns the manifest into what to load for it', /Load from the Jita hangar \| Load \| m³ \| Hold after/.test(await heads()) && /^For Hek: load /.test(await loadSaid()) && /All of it fits/.test(await loadSaid()), await loadSaid());
+  ok('with its volume', (await line.locator('td').nth(2).innerText()) === '58' && (await line.locator('td').nth(3).innerText()) !== '');
+  ok('only the units headed there are loaded', /^58 of 120 in the hangar$/.test((await line.locator('td').nth(1).innerText()).replace(/\s+/g, ' ')) && /^Hek 58/.test(await line.locator('td.best').last().innerText()));
+  const cargo = haul.locator('input[type=number]'), was = await cargo.inputValue();
+  const aboard = Number(((await loadSaid()).match(/\(([\d,]+) m³ is already aboard\)/) || [0, '0'])[1].replace(/,/g, ''));
+  await cargo.fill(String(aboard + 60)); await cargo.press('Enter'); await page.waitForTimeout(200);
+  const after = (await haul.locator('tbody tr td:nth-child(4)').allInnerTexts()).filter(Boolean).map(t => Number(t.replace(/,/g, '')));
+  ok('a small hold is filled to its room and no further', / m³ of the 60 m³ free/.test(await loadSaid()) && /will not fit whole/.test(await loadSaid()) && after.length > 0 && after.every((v, i) => v <= 60 && (!i || v >= after[i - 1])) && /hold is full/.test(await haul.locator('tbody').innerText()), await loadSaid());
+  await cargo.fill(was); await cargo.press('Enter'); await page.waitForTimeout(200);
+  await haul.locator('.haul-hub', { hasText: 'Rens' }).click(); await page.waitForTimeout(200);
+  ok('two hubs load for both', /^For Hek, Rens: load /.test(await loadSaid()) && /^95 of 120/.test((await line.locator('td').nth(1).innerText()).replace(/\s+/g, ' ')));
+  await shot('risk-load');
+  await page.locator('.tab', { hasText: 'Amarr' }).click(); await page.waitForTimeout(200);
+  ok('the manifest and its load list show at every hub', /^For Hek, Rens: load /.test(await loadSaid()) && await page.locator('#haul tbody tr').count() > 0);
+  await haul.locator('text=Whole manifest').click(); await page.waitForTimeout(200);
+  ok('and back to the whole manifest', /In the Jita hangar \| Units/.test(await heads()) && await haul.locator('.hold-by').count() === 0);
+  await page.locator('.tab', { hasText: 'Jita' }).click(); await page.waitForTimeout(200);
+
   // ---- exposure: where the committed ISK is headed, the limits, the gate
   const risk = page.locator('#risk'), rt = async () => (await risk.innerText()).replace(/\s+/g, ' ');
   const before = await rt();
