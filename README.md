@@ -124,6 +124,7 @@ EVE republishes on its own timers and the page refetches as each one lapses:
 | Hangars | 60 minutes |
 | Planets | 10 minutes |
 | Location | 5 seconds |
+- **Tab icon** (version 34): `icons/favicon.svg` is the Android app's launcher icon (its foreground on the hull colour, cropped to what a tab shows), with `favicon-32.png` and `apple-touch-icon.png` made from it. The service worker keeps them with the other versioned files.
 - **Version 29: guards, placement and New lines** (settings under `guard`, `batch`, `place`, `dead`, `notTraded` and `screen` in `js/config.js`), from the analysis of the week of Nov 16:
   - **Mistyped sell prices.** A sell order 25% or more under the next seller, or under what the line sold for at that hub this week, is a Check. A sale under cost in the last two days leads "Since you last looked" ("Sold under cost") and goes to the phone as a "check" notification, with every row that has a Check. In the Android app, "A price looks mistyped, or something sold under cost" and "Extractors stop" are on to begin with; stopped extractors are told again every 12 hours.
   - **The week after every fee.** "Net, all fees" (and the top bar's "Net since Monday", and the Trading widget) takes off the broker fees the wallet journal shows beyond the 1.5% counted on each sale: price changes, bids placed, listings not yet sold. Each weekly close says the same under its net. Ship hulls (`notTraded`, by item category) are left out of Sold, net and the ledger; planetary products stay in.
