@@ -457,7 +457,7 @@
         if (!x || x.ask == null) continue;
         if (x.ask * o.netMult - cost >= o.floor * cost) hubs.push({ name, ask: x.ask, levels: x.levels.slice().sort((a, b) => a[0] - b[0]) });
       }
-      if (hubs.length) out.push({ type, bid, atAsk, cost, jitaAsk: j.ask, hubs });
+      if (hubs.length) out.push({ type, bid, atAsk, cost, jitaAsk: j.ask, hubs, jitaLevels: atAsk ? j.levels.slice().sort((a, b) => a[0] - b[0]) : null });
     }
     return out;
   }
@@ -485,12 +485,25 @@
       hubs.push({ name: x.name, price, ask: x.ask, perDay, net, margin: net / c.cost });
     }
     if (!hubs.length) return null;
-    hubs.sort((a, b) => b.net * b.perDay - a.net * a.perDay);
-    const raw = sum(hubs, x => x.net * x.perDay * o.share), weight = o.weight == null ? 1 : o.weight;
     let units = Math.round(sum(hubs, x => x.perDay) * o.lotDays * o.lotShare);
     if (o.jitaPerDay != null && o.jitaPerDay > 0) units = Math.min(units, Math.floor(o.jitaPerDay));
     units = Math.max(1, Math.min(units, Math.floor(o.lotIsk / c.bid)));
-    return { type: c.type, bid: c.bid, atAsk: c.atAsk, cost: c.cost, score: raw * weight, raw, weight, hubs, lot: { units, isk: units * c.bid } };
+    // bought at the Jita ask: the lot is priced up the asks actually there (a few units listed far under the market are not a price),
+    // and held to what is listed within the 12 cheapest asks
+    let bid = c.bid, cost = c.cost, short = 1;
+    if (c.atAsk && c.jitaLevels && c.jitaLevels.length) {
+      let need = units, isk = 0, got = 0;
+      for (const l of c.jitaLevels) { if (need <= 0) break; const t = Math.min(need, l[1]); isk += t * l[0]; got += t; need -= t; }
+      if (!got) return null;
+      short = got / units; units = got; bid = isk / got; cost = bid;
+      for (const x of hubs) { x.net = x.price * o.netMult - cost; x.margin = x.net / cost; }
+      for (let i = hubs.length - 1; i >= 0; i--) if (hubs[i].net < o.floor * cost) hubs.splice(i, 1);
+      if (!hubs.length) return null;
+    }
+    hubs.sort((a, b) => b.net * b.perDay - a.net * a.perDay);
+    // a lot Jita cannot fill whole is worth that much less
+    const raw = sum(hubs, x => x.net * x.perDay * o.share) * short, weight = o.weight == null ? 1 : o.weight;
+    return { type: c.type, bid, atAsk: c.atAsk, cost, score: raw * weight, raw, weight, hubs, lot: { units, isk: units * bid } };
   }
 
   // ------------------------------------------------------------------ risk

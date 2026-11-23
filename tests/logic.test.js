@@ -1051,3 +1051,17 @@ test('new lines: books folded per hub, a price pass, then a volume pass and a sc
   c[0].hubs[0].levels = [[333000, 100 * 15]];
   assert.equal(L.screenScore(c[0], { Hek: rows }, o), null);
 });
+
+test('new lines: a line bought at the Jita ask is priced up the asks really listed there', () => {
+  const now = Date.parse('2026-11-22T12:00:00Z');
+  const rows = [1, 2, 3, 4, 5, 6, 7].map(i => ({ date: new Date(now - (8 - i) * 864e5).toISOString().slice(0, 10), average: 470700, volume: 181 }));
+  const o = { netMult: 0.95125, floor: 0.1, minPerDay: 5, maxDays: 14, share: 0.15, lotDays: 7, lotShare: 0.1, lotIsk: 150e6, now };
+  // two units listed far under the market, then the market: the lot is not costed at 14,930
+  const c = { type: 9, bid: 14930, atAsk: true, cost: 14930, hubs: [{ name: 'Amarr', ask: 470700, levels: [] }], jitaLevels: [[14930, 2], [400000, 500]] };
+  const s = L.screenScore(c, { Amarr: rows }, o);
+  assert.equal(s.lot.units, 127);
+  assert.ok(s.bid > 390000 && s.hubs[0].margin < 0.2, String(s.bid));
+  // not enough listed at all: the lot is what is there
+  const thin = L.screenScore(Object.assign({}, c, { jitaLevels: [[14930, 2]], hubs: [{ name: 'Amarr', ask: 470700, levels: [] }] }), { Amarr: rows }, o);
+  assert.equal(thin.lot.units, 2);
+});
