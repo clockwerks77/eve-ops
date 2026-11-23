@@ -1,25 +1,25 @@
 {
  "v": 1,
- "at": 1795393641361,
+ "at": 1794734925863,
  "pilot": "Sample Trader",
  "sample": true,
  "where": "Docked in Hek",
  "ship": "Prorator",
- "wealth": 9568758667.57,
+ "wealth": 9077847467.57,
  "both": true,
  "wallet": 6072843112.37,
- "escrow": 762253200,
+ "escrow": 271342000,
  "listed": 681631900,
- "week": 55387955.89999999,
- "today": 8995133.124999996,
+ "week": 76868469.75,
+ "today": 1441142.874999999,
  "orders": {
   "sells": 16,
-  "bids": 8,
+  "bids": 4,
   "change": 10,
-  "optional": 3,
-  "check": 4,
-  "hold": 5,
-  "used": 24,
+  "optional": 2,
+  "check": 1,
+  "hold": 2,
+  "used": 20,
   "max": 145
  },
  "hubs": [
@@ -56,12 +56,12 @@
   {
    "name": "Jita",
    "change": 3,
-   "optional": 1,
-   "check": 4,
-   "orders": 8,
+   "optional": 0,
+   "check": 1,
+   "orders": 4,
    "here": false,
    "jumps": 9,
-   "hold": 3
+   "hold": 0
   },
   {
    "name": "Amarr",
@@ -74,7 +74,7 @@
    "hold": 0
   }
  ],
- "booksAt": 1795393496993,
+ "booksAt": 1794734781640,
  "pi": {
   "go": "worth",
   "value": 66886500,
@@ -93,42 +93,42 @@
  "planets": [
   {
    "name": "Alakgur III",
-   "expiry": 1795386440993,
+   "expiry": 1794727725640,
    "product": "Biocells",
    "units": 1170,
    "fill": 0.08775
   },
   {
    "name": "Alakgur I",
-   "expiry": 1795616840993,
+   "expiry": 1794958125640,
    "product": "Biocells",
    "units": 975,
    "fill": 0.073125
   },
   {
    "name": "Alakgur II",
-   "expiry": 1795616840993,
+   "expiry": 1794958125640,
    "product": "Biocells",
    "units": 1065,
    "fill": 0.079875
   },
   {
    "name": "Alakgur IV",
-   "expiry": 1795616840993,
+   "expiry": 1794958125640,
    "product": "Biocells",
    "units": 1270,
    "fill": 0.09525
   },
   {
    "name": "Alakgur V",
-   "expiry": 1795616840993,
+   "expiry": 1794958125640,
    "product": "Biocells",
    "units": 1370,
    "fill": 0.10275
   },
   {
    "name": "Alakgur VI",
-   "expiry": 1795616840993,
+   "expiry": 1794958125640,
    "product": "Biocells",
    "units": 1460,
    "fill": 0.1095
@@ -137,9 +137,9 @@
  "skill": {
   "name": "Tycoon",
   "level": 1,
-  "done": 1795667240993
+  "done": 1795008525640
  },
- "skillEnd": 1796344040993,
+ "skillEnd": 1795685325640,
  "paused": false,
  "scout": {
   "name": "Sample Scout",
@@ -148,7 +148,7 @@
   "skill": {
    "name": "Archaeology",
    "level": 5,
-   "done": 1795919240993
+   "done": 1795260525640
   },
   "loot": {
    "places": 3,
@@ -174,89 +174,11 @@
   "kills": {
    "week": 3,
    "day": 1,
-   "last": 1795382841012
+   "last": 1794724125667
   },
   "sigs": 6,
   "links": 2,
-  "at": 1795393642572
+  "at": 1794734927068
  },
- "problems": 0,
- "alerts": [
-  {
-   "id": "c7000000011",
-   "kind": "change",
-   "text": "Hek: 200mm AutoCannon II"
-  },
-  {
-   "id": "c7000000010",
-   "kind": "change",
-   "text": "Hek: Gyrostabilizer II"
-  },
-  {
-   "id": "c7000000063",
-   "kind": "change",
-   "text": "Rens: Small Focused Pulse Laser II"
-  },
-  {
-   "id": "c7000000038",
-   "kind": "change",
-   "text": "Dodixie: 1MN Afterburner II"
-  },
-  {
-   "id": "c7000000037",
-   "kind": "change",
-   "text": "Dodixie: Ballistic Control System II"
-  },
-  {
-   "id": "c7000000032",
-   "kind": "change",
-   "text": "Dodixie: Ballistic Control System II"
-  },
-  {
-   "id": "c7000000082",
-   "kind": "change",
-   "text": "Jita: Small Shield Extender II"
-  },
-  {
-   "id": "k7000000082:382600",
-   "kind": "check",
-   "text": "Jita: Small Shield Extender II at 382,600. Listed for 1 day, not 90."
-  },
-  {
-   "id": "k7000000097:760000",
-   "kind": "check",
-   "text": "Jita: Warp Scrambler II at 760,000. 17% under the top bid, so it will not fill. A typo, or a bid the market has left behind."
-  },
-  {
-   "id": "c7000000073",
-   "kind": "change",
-   "text": "Jita: 10MN Afterburner II"
-  },
-  {
-   "id": "c7000000087",
-   "kind": "change",
-   "text": "Jita: Warp Disruptor II"
-  },
-  {
-   "id": "c7000000052",
-   "kind": "change",
-   "text": "Amarr: Medium Shield Extender II"
-  },
-  {
-   "id": "u60005686:2048:2026-11-16:22",
-   "kind": "check",
-   "text": "Hek: sold 6 Damage Control II under cost, down to 599,600 (-3.8M)"
-  },
-  {
-   "id": "x40150003:1795386440993:0",
-   "kind": "extractors",
-   "text": "Alakgur III, stopped 2 h ago"
-  }
- ],
- "notify": {
-  "change": false,
-  "extractors": true,
-  "launchpad": false,
-  "check": true
- }
+ "problems": 0
 }
