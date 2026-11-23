@@ -591,17 +591,29 @@
         return Math.min(sc.vertical.max, Math.max(sc.vertical.min, 1 + (v.net / v.cost - sc.vertical.pivot)));
       };
       const opts = { netMult: NET, floor: sc.floor, minPerDay: sc.minPerDay, maxDays: sc.maxDays, share: sc.share, lotDays: sc.lotDays, lotShare: sc.lotShare, lotIsk: sc.lotIsk, now: Date.now() };
+      // bulk: a lot is held to lotM3, and a line whose share of trade fills more than dayM3 a day counts for that much only (a hauler's day)
+      const bulk = x => {
+        const v = x ? (K.types[x.type] || {}).v : null;
+        if (!x || !(v > 0)) return x;
+        x.lot.units = Math.max(1, Math.min(x.lot.units, Math.floor(sc.lotM3 / v))); x.lot.isk = x.lot.units * x.bid;
+        const dayM3 = sum(x.hubs, y => y.perDay * sc.share) * v;
+        if (dayM3 > sc.dayM3) { x.score *= sc.dayM3 / dayM3; x.bulky = true; }
+        return x;
+      };
       let scored = cand.map(c => L.screenScore(c, hist.get(c.type) || {}, Object.assign({ weight: weightOf(c.type) }, opts))).filter(Boolean).sort((a, b) => b.score - a.score);
       const passed = scored.length;
+      scored = scored.slice(0, sc.keep * 4);
+      S.scanNote = 'Reading the volumes of the best ' + scored.length + '.'; paint();
+      await pool(scored, 10, x => typeInfo(x.type).catch(() => {}));
+      scored = scored.map(bulk).sort((a, b) => b.score - a.score);
       // Jita's own trade for the best of them: a first lot bigger than a day of it fills slowly
       scored = scored.slice(0, sc.keep * 2);
       const jitaDay = new Map();
       await pool(scored, 12, async x => { try { const w = L.weekOf((await E.page('/markets/' + C.jita.region + '/history/', { type_id: x.type }, 1)).data, 7); if (w) jitaDay.set(x.type, w.perDay); } catch (err) { /* not known */ } });
       const byType = new Map(cand.map(c => [c.type, c]));
-      scored = scored.map(x => Object.assign(L.screenScore(byType.get(x.type), hist.get(x.type) || {}, Object.assign({ weight: weightOf(x.type), jitaPerDay: jitaDay.get(x.type) }, opts)) || x, { jitaPerDay: jitaDay.get(x.type) || null }))
+      scored = scored.map(x => Object.assign(bulk(L.screenScore(byType.get(x.type), hist.get(x.type) || {}, Object.assign({ weight: weightOf(x.type), jitaPerDay: jitaDay.get(x.type) }, opts))) || x, { jitaPerDay: jitaDay.get(x.type) || null }))
         .sort((a, b) => b.score - a.score).slice(0, sc.keep);
       await resolveNames(scored.map(x => x.type)).catch(() => {});
-      await Promise.all(scored.map(x => typeInfo(x.type).catch(() => {})));
       const rows = scored.map(x => { const gid = allowed.get(x.type), v = vert.get(gid); return Object.assign(x, { group: gid, groupName: types.g[gid] || '', vertical: v && v.units >= sc.vertical.minSold && v.cost > 0 ? { margin: v.net / v.cost, units: v.units } : null }); });
       S.screen = { at: Date.now(), took: Date.now() - started, rows, counts: { pages, allowed: allowed.size, priced: cand.length, passed } };
       if (!demo) E.store.set('eveops.screen', S.screen);
@@ -1089,12 +1101,11 @@
           return rd && rd.price != null && rd.ask != null && rd.perDay >= R.minPerDay ? { name: hb.name, station: hb.station, price: rd.price, perDay: rd.perDay, margin: marginAt(hb, rd.price) } : null;
         }).filter(x => x && x.margin >= R.floor && x.margin >= m0 + C.place.better);
         if (alts.length) {
-          const dp = L.destPlan(seen.concat(alts), { cost: unit, buyFee: 0, netMult: NET, floor: R.floor, margin: R.margin, top: R.top });
-          if (dp.hubs.some(x => alts.some(a => a.name === x.name))) {
-            parts = dp.hubs.length > 1 ? L.splitUnits(qty, dp.hubs) : [{ name: dp.hubs[0].name, units: qty }];
-            const from = seen.reduce((a, b) => (b.margin > a.margin ? b : a));
-            moved = { from: from.name, fromMargin: from.margin, to: alts.filter(a => dp.hubs.some(x => x.name === a.name)).map(a => ({ name: a.name, margin: a.margin })) };
-          }
+          // the better hub first, up to what it has room for; the rest goes on by margin (below)
+          alts.sort((a, b) => b.margin - a.margin);
+          parts = [{ name: alts[0].name, units: qty }];
+          const from = seen.reduce((a, b) => (b.margin > a.margin ? b : a));
+          moved = { from: from.name, fromMargin: from.margin, to: alts.map(a => ({ name: a.name, margin: a.margin })) };
         }
       }
       // no hub gets more than it can sell in C.place.days; the spare goes to the next hub that nets the floor, best margin first, or stays
@@ -1866,13 +1877,13 @@
             h('td', null, r.hubs.slice(1).map(x => x.name + ' ' + pct(x.margin) + ' ' + num(Math.round(x.perDay)) + '/day').join(', ')),
             h('td', null, h('span', { class: r.net < 0 ? 'neg' : '' }, L.short(r.net)), h('span', { class: 'sub' }, pct(r.margin))),
             h('td', null, L.short(r.perDay)),
-            h('td', null, num(r.lot.units), h('span', { class: 'sub' }, L.short(r.lot.units * r.bid) + (r.m3 ? ', ' + num(Math.round(r.m3)) + ' m\u00b3' : '') + (r.jitaPerDay ? '; Jita trades ' + num(Math.round(r.jitaPerDay)) + ' a day' : ''))),
+            h('td', null, num(r.lot.units), h('span', { class: 'sub' }, L.short(r.lot.units * r.bid) + (r.m3 ? ', ' + num(Math.round(r.m3)) + ' m\u00b3' : '') + (r.jitaPerDay ? '; Jita trades ' + num(Math.round(r.jitaPerDay)) + ' a day' : '')), r.bulky ? h('span', { class: 'sub neg' }, 'bulky: ranked for ' + C.screen.dayM3 + ' m\u00b3 a day') : null),
             h('td', null, r.moved ? h('span', { class: 'sub neg' }, 'Jita has moved: nets ' + pct(r.margin) + ' now') : [priceMark('n' + r.type, r.bid, r.copied, r.atAsk || !gate.open), r.atAsk ? h('span', { class: 'sub' }, 'buy at the ask: your call') : !r.live ? h('span', { class: 'sub' }, 'as screened') : null]));
         })))) : h('p', { class: 'note' }, S.scanning ? 'The first screen takes about a minute.' : f && f.at ? 'Nothing passed the last screen.' : 'Not screened on this device yet. It runs by itself every ' + C.screen.everyHours + ' hours on a wide screen, or press Screen now.'),
       h('p', { class: 'note' }, 'Items you have never traded (no order, no sale or purchase in the wallet\u2019s history, no tracker row), costing up to ' + L.short(C.screen.maxCost) + ' in Jita: modules, charges, drones, implants and deployables. '
         + 'A hub counts where it trades ' + C.screen.minPerDay + ' or more a day, nets ' + Math.round(C.screen.floor * 100) + '% after every fee (the Jita broker fee included) at the lowest of its ask, its newest day\u2019s average and its week\u2019s average, and has no more than ' + C.screen.maxDays + ' days of trade already listed near that price. '
         + 'Worth a day is the net on ' + Math.round(C.screen.share * 100) + '% of those hubs\u2019 trade. The ranking is weighted by how that kind of item has netted for you (\u00d7 above 1 for kinds you do well in). '
-        + 'First lot is ' + C.screen.lotDays + ' days of ' + Math.round(C.screen.lotShare * 100) + '% of the hubs\u2019 trade, held to ' + L.short(C.screen.lotIsk) + ' and to a day of Jita\u2019s own trade. A line bought here starts on probation like any other.'));
+        + 'First lot is ' + C.screen.lotDays + ' days of ' + Math.round(C.screen.lotShare * 100) + '% of the hubs\u2019 trade, held to ' + L.short(C.screen.lotIsk) + ', to ' + num(C.screen.lotM3) + ' m\u00b3 and to a day of Jita\u2019s own trade. A bulky line (its share of trade fills more than ' + C.screen.dayM3 + ' m\u00b3 a day) is ranked for ' + C.screen.dayM3 + ' m\u00b3 a day only. A line bought here starts on probation like any other.'));
   }
   function feedPanel(m) {
     const mark = () => { S.seen = { at: Date.now(), orders: m.snapshot }; if (!demo) E.store.set('eveops.seen', S.seen); syncSoon(); paint(); };

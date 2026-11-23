@@ -119,6 +119,8 @@ window.EVEOPS_CONFIG = {
   screen: {
     categories: [7, 8, 18, 20, 22], skipGroups: [303], maxCost: 8e6, gap: 0.15, floor: 0.10, minPerDay: 5, maxDays: 14,
     share: 0.15, lotDays: 7, lotShare: 0.10, lotIsk: 150e6, keep: 25, everyHours: 6, minWidth: 1000, typesDays: 30,
+    // bulk: a first lot is held to lotM3, and a line whose share of trade fills more than dayM3 a day is scored for dayM3 only
+    lotM3: 1500, dayM3: 300,
     // a kind of item (its item group) you have made money on counts for more, one you have lost on for less: weight = 1 + (margin - pivot), held to [min, max]
     vertical: { pivot: 0.25, min: 0.6, max: 1.6, minSold: 3 },
   },
