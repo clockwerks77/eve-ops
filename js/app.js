@@ -1055,7 +1055,8 @@
     const fresh = !S.screen ? null : {
       at: S.screen.at, took: S.screen.took, counts: S.screen.counts || null, note: S.scanNote, scanning: S.scanning,
       rows: (S.screen.rows || []).filter(r => !tradedNow.has(r.type)).map(r => {
-        const live = r.atAsk ? jitaSell(r.type) : jitaBid(r.type), bid = live != null ? live : r.bid, cost = bid * (1 + (r.atAsk ? 0 : C.fees.broker));
+        // a line bought at the ask keeps the screen's price, worked up the asks for the whole lot; a bid is read live
+        const live = r.atAsk ? null : jitaBid(r.type), bid = live != null ? live : r.bid, cost = bid * (1 + (r.atAsk ? 0 : C.fees.broker));
         const hubs = r.hubs.map(x => Object.assign({}, x, { net: x.price * NET - cost, margin: (x.price * NET - cost) / cost }));
         const mk = S.copied['n' + r.type];
         return Object.assign({}, r, { name: nameOf(r.type), bid, live: live != null, hubs, net: hubs[0].net, margin: hubs[0].margin, moved: hubs[0].margin < C.screen.floor,
