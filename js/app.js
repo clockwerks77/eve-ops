@@ -2141,7 +2141,7 @@
           S.notifySettings ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => E.tell('notify-settings', {}) }, 'Open Android\u2019s settings for Eve Ops') : null),
         h('p', { class: 'note' }, 'Android should show its own question, "Allow Eve Ops to send you notifications?". If nothing appears, turn them on by hand: press and hold the Eve Ops icon on the home screen, choose App info, then Notifications. The phone\u2019s general list of notifying apps may not show Eve Ops until then.')] : null,
       any && S.notifyAllowed === 'old' ? h('p', { class: 'note neg' }, 'This build of the app cannot notify. Install the newest Eve Ops APK.') : null,
-      h('p', { class: 'note' }, 'The app checks about every half hour while it is closed and tells you once about each new thing. Routine changes only: big moves, snipers, slow lines and changes that would cost more than they earn stay quiet. Mistyped prices and sales under cost need app build 1.0.13 or newer.'));
+      h('p', { class: 'note' }, 'The app checks about every half hour while it is closed and tells you once about each new thing. Routine changes only: big moves, snipers, slow lines and changes that would cost more than they earn stay quiet. Mistyped prices and sales under cost need app build 1.0.15 or newer.'));
   }
   function syncPanel() {
     const Y = window.Sync;
