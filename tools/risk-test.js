@@ -44,7 +44,7 @@ const { serve, playwright, chrome, midweek } = require('./serve.js');
   ok('a bid the market has left behind is a Check', /Check/.test(await txt('Warp Scrambler II')) && /17% under the top bid, so it will not fill/.test(ws), ws);
   ok('a proven line is not tagged', await row('Small Shield Extender II').locator('.fresh').count() === 0);
   const sum = await page.locator('.stop-sum').first().innerText();
-  ok('the hub says what its checks and changes come to', /3 to check/.test(sum) && /3 to change for [\d.]+[kM]/.test(sum), sum);
+  ok('the hub says what its checks and changes come to', /4 to check/.test(sum) && /3 to change for [\d.]+[kM]/.test(sum), sum);
   await shot('risk-jita');
 
   // ---- haul manifest: value at cost, where a new line goes, the price not to list under
@@ -77,9 +77,9 @@ const { serve, playwright, chrome, midweek } = require('./serve.js');
   ok('only the units headed there are loaded', /^58 of 120 in the hangar$/.test((await line.locator('td').nth(1).innerText()).replace(/\s+/g, ' ')) && /^Hek 58/.test(await line.locator('td.best').last().innerText()));
   const cargo = haul.locator('input[type=number]'), was = await cargo.inputValue();
   const aboard = Number(((await loadSaid()).match(/\(([\d,]+) m³ is already aboard\)/) || [0, '0'])[1].replace(/,/g, ''));
-  await cargo.fill(String(aboard + 60)); await cargo.press('Enter'); await page.waitForTimeout(200);
+  await cargo.fill(String(aboard + 40)); await cargo.press('Enter'); await page.waitForTimeout(200);
   const after = (await haul.locator('tbody tr td:nth-child(4)').allInnerTexts()).filter(Boolean).map(t => Number(t.replace(/,/g, '')));
-  ok('a small hold is filled to its room and no further', / m³ of the 60 m³ free/.test(await loadSaid()) && /will not fit whole/.test(await loadSaid()) && after.length > 0 && after.every((v, i) => v <= 60 && (!i || v >= after[i - 1])) && /hold is full/.test(await haul.locator('tbody').innerText()), await loadSaid());
+  ok('a small hold is filled to its room and no further', / m³ of the 40 m³ free/.test(await loadSaid()) && /will not fit whole/.test(await loadSaid()) && after.length > 0 && after.every((v, i) => v <= 40 && (!i || v >= after[i - 1])) && /hold is full/.test(await haul.locator('tbody').innerText()), await loadSaid());
   await cargo.fill(was); await cargo.press('Enter'); await page.waitForTimeout(200);
   await haul.locator('.haul-hub', { hasText: 'Rens' }).click(); await page.waitForTimeout(200);
   ok('two hubs load for both', /^For Hek, Rens: load /.test(await loadSaid()) && /^95 of 120/.test((await line.locator('td').nth(1).innerText()).replace(/\s+/g, ' ')));

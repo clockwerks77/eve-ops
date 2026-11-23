@@ -62,4 +62,19 @@ class AlertsTest {
         val stopped = (1..3).map { Alerts.Alert("x$it", "extractors", "Planet $it") }
         assertEquals("Extractors stopped on 3 colonies", Alerts.notes(stopped, emptySet())[0].title)
     }
+
+    @Test
+    fun aMistypedPriceOrASaleUnderCost() {
+        val alerts = """[
+            {"id":"k7464:897200","kind":"check","text":"Hek: Heavy Neutron Blaster II at 897,200. 56% under the next seller. Check for a typo."},
+            {"id":"u60005686:2961:2026-11-16:18","kind":"check","text":"Hek: sold 24 Heavy Neutron Blaster II under cost, down to 897,200 (-10.6M)"}
+        ]"""
+        // an older page's notify settings have no "check": nothing is told
+        assertTrue(Alerts.wanted(summary("""{"change":true}""", alerts)).isEmpty())
+        val all = Alerts.wanted(summary("""{"check":true}""", alerts))
+        val note = Alerts.notes(all, emptySet())
+        assertEquals(listOf("check"), note.map { it.kind })
+        assertEquals("2 prices to check", note[0].title)
+        assertEquals("1 price to check", Alerts.notes(all.take(1), emptySet())[0].title)
+    }
 }

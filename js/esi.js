@@ -226,6 +226,27 @@
     return p;
   }
 
+  /**
+   * One page of a public path, fetched fresh and not kept (for the New lines screen, which reads whole regional books and thousands of
+   * histories once and keeps only what it needs). It runs outside the page's own request queue, so the board keeps refreshing meanwhile,
+   * but it waits out the same slow-down pause. A 404 is an empty page. -> { data, pages }
+   */
+  async function page(path, query, n) {
+    if (window.Demo && window.Demo.on) return window.Demo.page(path, query, n);
+    const wait = pausedUntil - Date.now();
+    if (wait > 0) await sleep(wait);
+    const q = Object.assign({}, query || {}, n > 1 ? { page: n } : null);
+    const res = await fetch(C.esi + path + (Object.keys(q).length ? '?' + form(q) : ''), { headers: { Accept: 'application/json' } });
+    if (res.status === 404) return { data: [], pages: 1 };
+    if (res.status === 420 || res.status === 429) {
+      const s = Number(res.headers.get('retry-after') || res.headers.get('x-esi-error-limit-reset') || 60);
+      pausedUntil = Date.now() + Math.min(Math.max(s, 5), 300) * 1000;
+      throw new EsiError(res.status, 'EVE asked the page to slow down.');
+    }
+    if (!res.ok) throw new EsiError(res.status, 'Request failed (' + res.status + ').');
+    return { data: await res.json(), pages: Number(res.headers.get('x-pages') || 1) };
+  }
+
   async function post(path, body) {
     if (window.Demo && window.Demo.on) return window.Demo.post(path, body);
     const res = await request(C.esi + path, false, {
@@ -234,5 +255,5 @@
     return res.json();
   }
 
-  window.Esi = { login, finishLogin, init, who, signOut, get, post, store, EsiError, native: !!N, tell, ask, get paused() { return Math.max(0, pausedUntil - Date.now()); } };
+  window.Esi = { login, finishLogin, init, who, signOut, get, page, post, store, EsiError, native: !!N, tell, ask, get paused() { return Math.max(0, pausedUntil - Date.now()); } };
 })();

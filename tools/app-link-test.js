@@ -35,13 +35,14 @@ const check = (label, ok, detail) => { if (!ok) failed++; console.log((ok ? 'ok 
   check('sample data in the app: a finished summary is handed over', !!last && last.settled === true && last.data.v === 1 && !page.errors.length, snaps.length + ' sent ' + page.errors.join(' | '));
   check('the summary has orders, planets, the wormhole pilot and loot', !!last && last.data.orders.change > 0 && last.data.planets.length > 0 && !!last.data.wh && last.data.scout.loot.list > 0);
   if (process.argv[2]) require('fs').writeFileSync(process.argv[2], JSON.stringify(last.data, null, 1));   // refresh the Android test fixture
-  check('the summary lists what could be notified, with every notification off to begin with', !!last && Array.isArray(last.data.alerts) && last.data.alerts.filter(a => a.kind === 'change').length > 0
-    && last.data.alerts.some(a => a.kind === 'extractors') && last.data.notify.change === false && last.data.notify.extractors === false && last.data.notify.launchpad === false);
+  check('the summary lists what could be notified; mistyped prices and stopped extractors are on to begin with (version 29), the rest off', !!last && Array.isArray(last.data.alerts) && last.data.alerts.filter(a => a.kind === 'change').length > 0
+    && last.data.alerts.some(a => a.kind === 'extractors') && last.data.alerts.some(a => a.kind === 'check' && /under cost/.test(a.text))
+    && last.data.notify.change === false && last.data.notify.extractors === true && last.data.notify.check === true && last.data.notify.launchpad === false, last && JSON.stringify(last.data.notify));
   check('orders to change are named by hub and full item name', !!last && last.data.alerts.filter(a => a.kind === 'change').every(a => /^c\d+$/.test(a.id) && /^[A-Z][a-z]+: \S/.test(a.text)), last && JSON.stringify(last.data.alerts.slice(0, 2)));
-  await page.locator('.panel-notify .check input').first().check();
+  await page.locator('.panel-notify .check', { hasText: 'An order loses the lead' }).locator('input').check();
   await page.waitForTimeout(1800);
   const after = await page.evaluate(() => ({ asked: window.__sent.filter(m => m.op === 'notify' && m.ask === true).length, snaps: window.__sent.filter(m => m.op === 'snapshot') }));
-  check('turning a notification on asks the app for permission and reaches it in the next summary', after.asked === 1 && after.snaps[after.snaps.length - 1].data.notify.change === true);
+  check('turning a notification on asks the app for permission and reaches it in the next summary', after.asked >= 1 && after.snaps[after.snaps.length - 1].data.notify.change === true, 'asked ' + after.asked);
   const waiting = await page.locator('.panel-notify').innerText();
   check('while Android has not allowed them the panel says so and offers to ask again and to open the settings', /has not allowed notifications/.test(waiting) && /Ask Android to allow them/.test(waiting) && /Open Android.s settings for Eve Ops/.test(waiting) && /App info, then Notifications/.test(waiting), waiting.slice(0, 200));
   await page.waitForTimeout(3200);

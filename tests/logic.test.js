@@ -963,3 +963,91 @@ test('units that leave the hold unexplained come off the hub you are in, then th
   // an item with nowhere to go is kept as "nowhere yet"
   assert.deepEqual(L.loadStep(null, { qty: 5, orders: [], here: null, split: () => [] }).left, [{ name: '', units: 5 }]);
 });
+
+test('checks: a sell order far under the next seller, or under what it sold for this week, is a likely typo', () => {
+  const base = { isBuy: false, duration: 90, known: true, netMult: 0.95125 };
+  // the Heavy Neutron Blaster II case: 897,200 typed for a market near 2,061,000
+  assert.match(L.orderChecks(Object.assign({}, base, { price: 897200, front: 2061000, cost: 1570000 })).join(' '), /56% under the next seller/);
+  assert.match(L.orderChecks(Object.assign({}, base, { price: 897200, front: 2061000, cost: 1570000 })).join(' '), /below your cost/);
+  // 25% under is now enough (it was 30%)
+  assert.equal(L.orderChecks(Object.assign({}, base, { price: 740000, front: 1000000 })).length, 1);
+  assert.equal(L.orderChecks(Object.assign({}, base, { price: 760000, front: 1000000 })).length, 0);
+  // no other seller: judged against what you sold it for here this week
+  assert.match(L.orderChecks(Object.assign({}, base, { price: 903300, front: null, typical: 1650000 })).join(' '), /under what you sold it for here this week/);
+  assert.equal(L.orderChecks(Object.assign({}, base, { price: 1600000, front: null, typical: 1650000 })).length, 0);
+});
+
+test('a price change earns its fee only if it costs no more than the profit on a day of sales', () => {
+  assert.deepEqual(L.payback(860000, 672000, 0.43), { sales: 2, perDay: 0.43, worth: false });        // Tracking Computer II in Rens
+  assert.equal(L.payback(443000, 626000, 3).worth, true);                                                  // Medium Cargohold Optimization II in Hek
+  assert.equal(L.payback(200000, 477, 1643).worth, true);                                                  // Mystic M: 420 sales, sold 1,643 a day
+  assert.equal(L.payback(100, 50, null), null);
+  const pos = { status: 'undercut', price: 2043000, remain: 108, front: 2042000, ahead: 3, unitsUnder: 3 };
+  const g = [{ order: { order_id: 1 }, pos }];
+  const ctx = { cost: 1400000, jitaSell: null, isJita: false, netMult: 0.95125, modify: 0.0039, sniperUnits: 0, bigMove: 0.02 };
+  assert.equal(L.planSells(g, Object.assign({ pace: 0.4 }, ctx)).get(1).action, 'optional');
+  assert.equal(L.planSells(g, Object.assign({ pace: 0.4 }, ctx)).get(1).kind, 'fee');
+  assert.equal(L.planSells(g, Object.assign({ pace: 5 }, ctx)).get(1).action, 'tick');
+  assert.equal(L.planSells(g, ctx).get(1).action, 'tick');        // pace not known: not judged
+});
+
+test('list in batches of a few days of sales', () => {
+  assert.deepEqual(L.batch(156, 16 * 0.25, 3), { list: 12, keep: 144 });
+  assert.deepEqual(L.batch(5, 4, 3), { list: 5, keep: 0 });
+  assert.deepEqual(L.batch(40, 0.1, 3), { list: 1, keep: 39 });
+  assert.deepEqual(L.batch(40, null, 3), { list: 40, keep: 0 });
+});
+
+test('a hub takes no more than it has room for; the rest goes on, or stays behind', () => {
+  assert.deepEqual(L.capSplit([{ name: 'Rens', units: 60 }, { name: 'Amarr', units: 40 }], { Rens: 10 }, ['Amarr', 'Dodixie']), [{ name: 'Rens', units: 10 }, { name: 'Amarr', units: 90 }]);
+  assert.deepEqual(L.capSplit([{ name: 'Rens', units: 60 }], { Rens: 10, Amarr: 20 }, ['Amarr']), [{ name: 'Rens', units: 10 }, { name: 'Amarr', units: 20 }, { name: '', units: 30 }]);
+  assert.deepEqual(L.capSplit([{ name: 'Hek', units: 8 }], {}, []), [{ name: 'Hek', units: 8 }]);
+  assert.deepEqual(L.capSplit([{ name: 'Rens', units: 5 }], { Rens: -3 }, []), [{ name: '', units: 5 }]);
+});
+
+test('a bid over its max with nothing filled for three days is a dead bid', () => {
+  const now = Date.parse('2026-11-22T12:00:00Z'), D = 864e5;
+  assert.match(L.deadBid({ kind: 'over', issued: now - 5 * D, lastFill: 0, escrow: 95.8e6, now }, 3).reason, /cancel it to free 95\.8M/);
+  assert.equal(L.deadBid({ kind: 'over', issued: now - 5 * D, lastFill: now - D, escrow: 1, now }, 3), null);
+  assert.equal(L.deadBid({ kind: 'over', issued: now - 5 * 36e5, lastFill: 0, escrow: 1, now }, 3), null);
+  assert.equal(L.deadBid({ kind: 'big', issued: now - 5 * D, lastFill: 0, escrow: 1, now }, 3), null);
+});
+
+test('the week\'s net after every broker fee paid', () => {
+  // the week of Nov 16: 885.5M by the ledger, 338.5M of broker fees, 4.10B of trading sales
+  const t = L.trueNet(885.5e6, 4.1e9, -338.5e6, 0.015);
+  assert.equal(Math.round(t.extra / 1e5) / 10, 277);
+  assert.equal(Math.round(t.net / 1e5) / 10, 608.5);
+  assert.equal(L.trueNet(100, 1000, -5, 0.015).net, 100);
+  assert.equal(L.trueNet(null, 1, 1, 0), null);
+});
+
+test('new lines: books folded per hub, a price pass, then a volume pass and a score', () => {
+  const acc = new Map(), jita = { name: 'Jita', station: 1, system: 10 }, hek = { name: 'Hek', station: 2, system: 20 };
+  L.screenEat(acc, [
+    { type_id: 7, location_id: 1, system_id: 10, is_buy_order: true, price: 175000, range: 'station', volume_remain: 100 },
+    { type_id: 7, location_id: 99, system_id: 10, is_buy_order: true, price: 176000, range: 'solarsystem', volume_remain: 100 },      // same system, reaches
+    { type_id: 7, location_id: 98, system_id: 11, is_buy_order: true, price: 190000, range: 'station', volume_remain: 100 },          // elsewhere: does not
+    { type_id: 7, location_id: 1, system_id: 10, is_buy_order: false, price: 190000, range: 'region', volume_remain: 50 },
+  ], jita);
+  L.screenEat(acc, [{ type_id: 7, location_id: 2, system_id: 20, is_buy_order: false, price: 340000, range: 'region', volume_remain: 30 },
+    { type_id: 8, location_id: 2, system_id: 20, is_buy_order: false, price: 1000, range: 'region', volume_remain: 1 }], hek);
+  assert.equal(acc.get(7).Jita.bid, 176000);
+  assert.equal(acc.get(7).Hek.ask, 340000);
+  const c = L.screenCandidates(acc, { allowed: new Set([7, 8]), skip: new Set(), jita: 'Jita', hubs: ['Hek'], maxCost: 8e6, gap: 0.15, netMult: 0.95125, buyFee: 0.015, floor: 0.1 });
+  assert.equal(c.length, 1);
+  assert.equal(c[0].bid, 176100);
+  assert.equal(c[0].atAsk, false);
+  const now = Date.parse('2026-11-22T12:00:00Z');
+  const rows = [1, 2, 3, 4, 5, 6, 7].map(i => ({ date: new Date(now - (8 - i) * 864e5).toISOString().slice(0, 10), average: 332000, volume: 100 }));
+  const o = { netMult: 0.95125, floor: 0.1, minPerDay: 5, maxDays: 14, share: 0.15, lotDays: 7, lotShare: 0.1, lotIsk: 150e6, now };
+  const s = L.screenScore(c[0], { Hek: rows }, Object.assign({ jitaPerDay: 1899 }, o));
+  assert.equal(s.hubs[0].name, 'Hek');
+  assert.equal(s.lot.units, 70);
+  assert.ok(Math.abs(s.hubs[0].margin - (332000 * 0.95125 - 176100 * 1.015) / (176100 * 1.015)) < 1e-9);
+  assert.equal(L.screenScore(c[0], { Hek: rows }, Object.assign({ weight: 1.5 }, o)).score, s.score * 1.5);
+  // too few traded, or too much already listed near the price: the hub does not count
+  assert.equal(L.screenScore(c[0], { Hek: rows.map(r => Object.assign({}, r, { volume: 3 })) }, o), null);
+  c[0].hubs[0].levels = [[333000, 100 * 15]];
+  assert.equal(L.screenScore(c[0], { Hek: rows }, o), null);
+});

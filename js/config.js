@@ -51,7 +51,7 @@ window.EVEOPS_CONFIG = {
     2344, 2345, 2346, 2348, 2349, 2351, 2352, 2354, 2358, 2360, 2361, 2366, 2367, 9834, 9846, 9848, 12836, 17136, 17392, 17898, 28974,
     2867, 2868, 2869, 2870, 2871, 2872, 2875, 2876],
   // Raised when the way a week's net is worked out changes, so finished weeks EVE still has the sales for are worked out again.
-  ledgerRules: 2,
+  ledgerRules: 3,
 
   // Restock shortlist: lines with this many days of stock or fewer, that sold at least minWeek units in 7 days. Lines netting under minMargin are listed but not offered a bid.
   restock: { days: 4, minWeek: 5, minMargin: 0.10 },
@@ -99,6 +99,28 @@ window.EVEOPS_CONFIG = {
     limits: { reserve: 2e9, unproven: 4e9, hub: 2e9, trip: 1e9 },
     // The week's price-change fees are called out when they pass this share of the week's net.
     feeShare: 0.05,
+  },
+
+  // ---- Version 29: guards and placement, from the week of Nov 16 (see the project's weekly analysis of 2026-11-22).
+  // A sell order this far under the next seller, or under what the line sold for at that hub this week, is a likely typo (a dropped digit).
+  guard: { under: 0.25 },
+  // List this many days of the sales you can expect at a hub at a time; the rest waits in that station's hangar. Where you have no sale
+  // of your own there yet, the pace counted on is `share` of what the hub trades.
+  batch: { days: 3, share: 0.15 },
+  // Where stock goes: a hub that nets `better` more (as a share of cost) than every hub you sold the line in this week, and trades at least
+  // risk.minPerDay a day, takes a share too; and no hub is sent more than `days` of `share` of what it trades, less what you already list there.
+  place: { better: 0.15, days: 10, share: 0.25 },
+  // A bid over its max that has bought nothing for this many days is offered for cancelling.
+  dead: { days: 3 },
+  // Ship hulls bought or sold (a Bowhead, an Orca) are not trading: left out of "Sold", net and the ledger. By item category name.
+  notTraded: ['Ship'],
+  // New lines (the screen on the Jita tab). Categories: Module 7, Charge 8, Drone 18, Implant 20, Deployable 22; group 303 (boosters)
+  // is contraband in high-security space. See README for the passes.
+  screen: {
+    categories: [7, 8, 18, 20, 22], skipGroups: [303], maxCost: 8e6, gap: 0.15, floor: 0.10, minPerDay: 5, maxDays: 14,
+    share: 0.15, lotDays: 7, lotShare: 0.10, lotIsk: 150e6, keep: 25, everyHours: 6, minWidth: 1000, typesDays: 30,
+    // a kind of item (its item group) you have made money on counts for more, one you have lost on for less: weight = 1 + (margin - pivot), held to [min, max]
+    vertical: { pivot: 0.25, min: 0.6, max: 1.6, minSold: 3 },
   },
 
   // ---- Expedition ops (the wormhole camp): Phase A, Muster and Kit & Shopping.

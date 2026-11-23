@@ -26,7 +26,7 @@
     2474: 'Barren Advanced Industry Facility', 2524: 'Barren Command Center', 2544: 'Barren Launchpad', 2848: 'Barren Extractor Control Unit',
     30744: 'Neural Network Analyzer', 30745: 'Sleeper Data Library', 30746: 'Ancient Coordinates Database', 25624: 'Intact Armor Plates',
     30259: 'Melted Nanoribbons', 30377: 'Fullerite-C320', 30378: 'Fullerite-C540', 20424: 'Datacore - Mechanical Engineering', 11188: 'Stratios', 13278: 'Archaeology',
-    3244: 'Warp Disruptor II', 1978: 'Tracking Computer II', 448: 'Warp Scrambler II',
+    3244: 'Warp Disruptor II', 1978: 'Tracking Computer II', 448: 'Warp Scrambler II', 28274: "'Augmented' Hobgoblin", 34328: 'Bowhead',
     3443: 'Trade', 3444: 'Retail', 16596: 'Wholesale', 18580: 'Tycoon', 33399: 'Infomorph Synchronizing', 16622: 'Accounting',
   };
 
@@ -66,6 +66,8 @@
     [3244, 210, 210, 838000, [[839800, 35], [839700, 50], [839500, 793]]],
     [1978, 159, 128, 945900, [[948000, 12], [947000, 30], [946000, 55]]],
     [448, 129, 129, 760000, [[913200, 89], [913100, 674], [913000, 120]]],
+    // version 29: a bid over its max that has bought nothing in five days, offered for cancelling
+    [28274, 29, 29, 3304000, [[4000000, 12], [3903000, 14], [3308000, 50]]],
   ];
   // Lines never sold at a hub, so each hub is read from its book and its region's month of history.
   // type -> { hub: [lowest ask, average traded price, units a day] }
@@ -75,6 +77,7 @@
     3244: { hek: [1182000, 1178000, 150], rens: [1098000, 1101000, 96], dodixie: [1117000, 1121000, 63], amarr: [2900000, 1220000, 27] },     // Amarr: one thin listing far above what it trades at
     1978: { amarr: [1050000, 1061000, 170], dodixie: [1065000, 1070000, 80] },                                                                  // the hubs have fallen under this bid's floor
     448: { amarr: [1170000, 1166000, 139], rens: [1174000, 1180000, 44] },
+    28274: { amarr: [4100000, 4050000, 25], dodixie: [4200000, 4150000, 10] },
   };
 
   let seed = 7;
@@ -126,8 +129,11 @@
   for (let i = 0; i < 4; i++) tx.push({ transaction_id: tid++, date: iso((0.4 + i * 0.9) * D), type_id: 380, location_id: ST.rens, quantity: 12, unit_price: 512000, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
   rival(REGION[ST.rens], 380, ST.rens, false, 515000, 14, 5 * H);
   tx.push({ transaction_id: tid++, date: iso(1.2 * D), type_id: 2329, location_id: ST.hek, quantity: 1400, unit_price: 9150, is_buy: false, is_personal: true, client_id: 2, journal_ref_id: tid });
+  // version 29: a sell order typed a digit short (599,600 for 1,496,000) bought out within the hour, and a ship hull sold, which is not trading
+  tx.push({ transaction_id: tid++, date: iso(0.45 * D), type_id: 2048, location_id: ST.hek, quantity: 6, unit_price: 599600, is_buy: false, is_personal: true, client_id: 3, journal_ref_id: tid });
+  tx.push({ transaction_id: tid++, date: iso(1.6 * D), type_id: 34328, location_id: ST.amarr, quantity: 1, unit_price: 1208000000, is_buy: false, is_personal: true, client_id: 4, journal_ref_id: tid });
   for (const [type, total, left, bid, rivals] of bids) {
-    const mine = { order_id: oid++, type_id: type, location_id: ST.jita, region_id: 10000002, is_buy_order: true, price: bid, volume_remain: left, volume_total: total, issued: iso(type === 380 ? 3 * H : 40 * H), duration: type === 380 ? 1 : 90, range: 'station', escrow: bid * left, min_volume: 1, is_corporation: false };
+    const mine = { order_id: oid++, type_id: type, location_id: ST.jita, region_id: 10000002, is_buy_order: true, price: bid, volume_remain: left, volume_total: total, issued: iso(type === 380 ? 3 * H : type === 28274 ? 122 * H : 40 * H), duration: type === 380 ? 1 : 90, range: 'station', escrow: bid * left, min_volume: 1, is_corporation: false };
     orders.push(mine);
     book(10000002, type).push(Object.assign({ system_id: 30000142 }, mine));
     rivals.forEach(([p, u], i) => rival(10000002, type, ST.jita, true, p, u, (5 + i * 9) * H));
@@ -157,8 +163,8 @@
         r(3, 7, 2396, 20, 7), r(5, 7, 2399, 20, 8), r(4, 8, 2396, 20, 9), r(6, 8, 2399, 20, 10), r(7, 10, 2329, 5, 11), r(8, 10, 2329, 5, 12)] };
   };
   // the wormhole pilot's loot: [type, group, m3 each, average price, { hub: [ask, bid, bid units] }]
-  const GROUPS = { 880: ['Sleeper Components', 17], 754: ['Salvaged Materials', 4], 711: ['Harvestable Cloud', 25], 333: ['Datacores', 17] };
-  const CATS = { 17: 'Commodity', 4: 'Material', 25: 'Asteroid' };
+  const GROUPS = { 880: ['Sleeper Components', 17], 754: ['Salvaged Materials', 4], 711: ['Harvestable Cloud', 25], 333: ['Datacores', 17], 883: ['Capital Industrial Ship', 6] };
+  const CATS = { 17: 'Commodity', 4: 'Material', 25: 'Asteroid', 6: 'Ship' };
   const loot = [
     [30744, 880, 0.01, 200000, { jita: [203000, 200000, 9000], amarr: [205000, 200000, 9000], dodixie: [null, 200000, 9000], rens: [209000, 200000, 9000], hek: [212000, 200000, 9000] }],
     [30745, 880, 0.01, 500000, { jita: [506000, 500000, 9000], amarr: [509000, 500000, 9000], dodixie: [512000, 500000, 9000], rens: [null, 500000, 9000], hek: [519000, 500000, 9000] }],
@@ -196,9 +202,46 @@
       if (!t.is_buy) journal.push({ id: jid++, date: t.date, ref_type: 'transaction_tax', amount: -Math.round(gross * 0.03375 * 100) / 100 });
       if (!t.is_buy && i % 3 === 0) journal.push({ id: jid++, date: t.date, ref_type: 'brokers_fee', amount: -Math.round(gross * 0.0039 * 100) / 100 });
     });
+    // version 29: a busy day of price changes and new bids, which the sales' own net does not count
+    for (const [ago, fee] of [[0.9, -6.1e6], [1.4, -4.8e6], [2.1, -9.3e6]]) journal.push({ id: jid++, date: iso(ago * D), ref_type: 'brokers_fee', amount: fee });
+    journal.sort((a, b) => Date.parse(a.date) - Date.parse(b.date) || a.id - b.id);
     let bal = 6072843112.37;
     for (let i = journal.length - 1; i >= 0; i--) { journal[i].balance = Math.round(bal * 100) / 100; bal -= journal[i].amount; }
     journal.reverse();
+  }
+
+  // ---- the New lines screen (version 29): four items never traded, in item groups of their own and one beside a line you sell
+  const SCREEN = {
+    cats: { 7: [1001, 1002], 18: [1003] },
+    groups: { 1001: ['Frequency Mining Laser Crystals', [18066]], 1002: ['Rig Navigation', [31177, 527]], 1003: ['Drone Upgrades', [24348, 43551]] },
+    // type -> [Jita top bid, Jita ask, Jita a day, { hub: [ask, week average, a day] }]
+    items: {
+      18066: [175000, 190000, 1899, { hek: [340000, 332800, 100], dodixie: [262000, 259200, 250] }],
+      31177: [853600, 899400, 596, { hek: [1550000, 1546600, 8], rens: [1370000, 1364800, 24], dodixie: [1290000, 1282000, 17] }],
+      24348: [791800, 820000, 571, { rens: [1290000, 1285000, 12], hek: [1130000, 1124700, 18] }],
+      43551: [1396000, 1621000, 359, { amarr: [1950000, 1944000, 64] }],
+    },
+  };
+  Object.assign(names, { 18066: 'Simple Asteroid Mining Crystal Type A II', 31177: 'Small Polycarbon Engine Housing II', 24348: 'Drone Link Augmentor II', 43551: 'Mining Foreman Burst II' });
+  for (const t of Object.keys(SCREEN.items)) {
+    const [bid, ask, , hubs] = SCREEN.items[t];
+    rival(10000002, Number(t), ST.jita, true, bid, 400, 3 * H); rival(10000002, Number(t), ST.jita, false, ask, 300, 3 * H);
+    for (const hub of Object.keys(hubs)) rival(REGION[ST[hub]], Number(t), ST[hub], false, hubs[hub][0], 20, 5 * H);
+  }
+  function page(path, query, n) {
+    let m;
+    if ((m = path.match(/\/universe\/groups\/(\d+)\/$/)) && SCREEN.groups[m[1]]) return Promise.resolve({ data: { group_id: Number(m[1]), name: SCREEN.groups[m[1]][0], published: true, types: SCREEN.groups[m[1]][1] }, pages: 1 });
+    if ((m = path.match(/\/markets\/(\d+)\/orders\/$/))) {
+      const out = [];
+      for (const k of Object.keys(books)) if (k.indexOf(m[1] + ':') === 0) out.push.apply(out, books[k]);
+      return Promise.resolve({ data: out, pages: 1 });
+    }
+    if ((m = path.match(/\/markets\/(\d+)\/history\/$/)) && SCREEN.items[query.type_id]) {
+      const it = SCREEN.items[query.type_id], hub = Object.keys(ST).find(k => REGION[ST[k]] === Number(m[1]));
+      const f = hub === 'jita' ? [it[1], it[1], it[2]] : it[3][hub];
+      return Promise.resolve({ data: f ? Array.from({ length: 8 }, (_, i) => ({ date: iso((8 - i) * D).slice(0, 10), average: f[1], highest: f[1], lowest: f[1], order_count: 9, volume: f[2] })) : [], pages: 1 });
+    }
+    return Promise.resolve({ data: [], pages: 1 });
   }
 
   function answer(data, ttl, age) { return Promise.resolve({ data, fetched: now, modified: now - (age || 0), expires: Date.now() + ttl }); }
@@ -212,6 +255,7 @@
       if (/\/skillqueue\/$/.test(path)) return answer([{ skill_id: 13278, finished_level: 5, queue_position: 0, start_date: iso(30 * H), finish_date: iso(-(6 * D + 2 * H)) }], 2 * M, M);
       if (/\/orders\/$/.test(path)) return answer([], 20 * M, 9 * M);
     }
+    if ((m = path.match(/\/universe\/categories\/(\d+)\/$/)) && /^(7|8|18|20|22)$/.test(m[1])) return answer({ category_id: Number(m[1]), name: 'Category ' + m[1], groups: SCREEN.cats[m[1]] || [] }, D);
     if ((m = path.match(/\/universe\/structures\/(\d+)\/$/))) return answer({ name: 'J111613 - Sample Fortizar', solar_system_id: 31002318, position: { x: 0, y: 0, z: 0 } }, D);
     if ((m = path.match(/\/universe\/groups\/(\d+)\/$/)) && GROUPS[m[1]]) return answer({ group_id: Number(m[1]), name: GROUPS[m[1]][0], category_id: GROUPS[m[1]][1] }, D);
     if ((m = path.match(/\/universe\/categories\/(\d+)\/$/)) && CATS[m[1]]) return answer({ category_id: Number(m[1]), name: CATS[m[1]] }, D);
@@ -226,6 +270,8 @@
       { item_id: 1, type_id: 527, quantity: 60, location_id: ST.jita, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 2, type_id: 2329, quantity: 1200, location_id: ST.hek, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 7, type_id: 3244, quantity: 120, location_id: ST.jita, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
+      // version 29: stock left in a hub's hangar, to be listed a few days of sales at a time
+      { item_id: 8, type_id: 2488, quantity: 300, location_id: ST.dodixie, location_type: 'station', location_flag: 'Hangar', is_singleton: false },
       { item_id: 3, type_id: 12733, quantity: 1, location_id: ST.hek, location_type: 'station', location_flag: 'Hangar', is_singleton: true },
       // in the hold of the ship being flown: one item that sells best where the ship is docked, one that sells best elsewhere, and ammunition that is not traded
       { item_id: 4, type_id: 2048, quantity: 30, location_id: 3, location_type: 'item', location_flag: 'Cargo', is_singleton: false },
@@ -247,7 +293,7 @@
     ] }, 2 * M, M);
     if (/\/planets\/$/.test(path)) return answer(planets, 10 * M, 4 * M);
     if ((m = path.match(/\/planets\/(\d+)\/$/)) && /characters/.test(path)) return answer(colony(Number(m[1]) - 40150000), 10 * M, 4 * M);
-    if ((m = path.match(/\/universe\/types\/(\d+)\/$/))) { const lt = lootOf.get(Number(m[1])); return answer({ type_id: Number(m[1]), volume: lt ? lt[2] : { 2288: 0.005, 2270: 0.005, 2396: 0.19, 2399: 0.19, 2329: 0.75 }[m[1]] || 1, capacity: { 2524: 500, 2544: 10000 }[m[1]] || 0, group_id: lt ? lt[1] : undefined }, D); }
+    if ((m = path.match(/\/universe\/types\/(\d+)\/$/))) { const lt = lootOf.get(Number(m[1])); return answer({ type_id: Number(m[1]), volume: lt ? lt[2] : { 2288: 0.005, 2270: 0.005, 2396: 0.19, 2399: 0.19, 2329: 0.75 }[m[1]] || 1, capacity: { 2524: 500, 2544: 10000 }[m[1]] || 0, group_id: lt ? lt[1] : { 34328: 883 }[m[1]] }, D); }
     if ((m = path.match(/\/markets\/(\d+)\/history\/$/)) && lootOf.has(Number(q.type_id))) {
       const base = { 30744: 4000, 30745: 900, 30746: 300, 25624: 600, 30259: 1500, 30377: 9000, 30378: 5000, 20424: 2500 }[q.type_id];
       const mult = { 10000002: 1, 10000043: 0.2, 10000032: 0.08, 10000042: 0.05, 10000030: 0.002 }[m[1]] || 0;
@@ -284,5 +330,5 @@
     return Promise.reject(new window.Esi.EsiError(404, 'Sample data has no answer for ' + path));
   }
 
-  window.Demo = { on, get, post, orderLog, who: { id: CHAR, name: 'Sample Trader', scopes: [] }, scout: { id: SCOUT, name: 'Sample Scout', scopes: [] } };
+  window.Demo = { on, get, page, post, orderLog, who: { id: CHAR, name: 'Sample Trader', scopes: [] }, scout: { id: SCOUT, name: 'Sample Scout', scopes: [] } };
 })();

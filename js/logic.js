@@ -144,7 +144,12 @@
       for (const g of live) {
         if (action === 'hold') out.set(g.order.order_id, holdAt(g, reason));
         else if (g.pos.price <= target) out.set(g.order.order_id, holdAt(g, 'Already under the front.'));
-        else out.set(g.order.order_id, Object.assign({ action, kind, reason }, money(target, g)));
+        else {
+          const m = money(target, g), back = action === 'tick' ? payback(m.fee, m.net, ctx.pace) : null;
+          // a change that costs more than the profit on the sales it can bring in a day is not urged: the price is still offered
+          if (back && !back.worth) out.set(g.order.order_id, Object.assign({ action: 'optional', kind: 'fee', reason: reason + '. Changing costs the profit on ' + back.sales + ' sales; you sell about ' + paceText(ctx.pace) + ' a day here. Your call.', payback: back }, m));
+          else out.set(g.order.order_id, Object.assign({ action, kind, reason, payback: back }, m));
+        }
       }
       return out;
     }
@@ -320,13 +325,172 @@
       // far under the top bid it will not fill, unless the top bid is past what the line supports (o.max), where staying behind is the plan
       else if (o.behind && o.wall != null && o.price <= o.wall * (1 - o.behind) && !(o.max != null && tickAbove(o.wall) > o.max)) out.push(pct(1 - o.price / o.wall) + ' under the top bid, so it will not fill. A typo, or a bid the market has left behind.');
     } else {
-      if (o.front != null && o.price <= o.front * 0.7) out.push(pct(1 - o.price / o.front) + ' under the next seller. Check for a typo.');
+      // a dropped digit (897,200 for 1,897,200) sells at half price within minutes: caught against the next seller, and against what you
+      // sold it for here this week (`typical`) where there is no other seller to go by
+      const low = o.under || 0.25;
+      if (o.front != null && o.price <= o.front * (1 - low)) out.push(pct(1 - o.price / o.front) + ' under the next seller. Check for a typo.');
+      else if (o.typical != null && o.typical > 0 && o.price <= o.typical * (1 - low)) out.push(pct(1 - o.price / o.typical) + ' under what you sold it for here this week. Check for a typo.');
       else if (o.front != null && o.price >= o.front * 1.5) out.push(pct(o.price / o.front - 1) + ' above the front. Check for a typo.');
       if (o.cost != null && o.cost > 0 && o.price * o.netMult < o.cost) out.push('Sells below your cost.');
     }
     // the price copied from the page and the price the order ended up at are far apart: most likely a slip of the keys
     if (o.copied != null && o.copied > 0 && Math.abs(o.price - o.copied) / o.copied > 0.02) out.push('You copied ' + isk(o.copied) + ' but the order shows ' + isk(o.price) + '.');
     return out;
+  }
+
+  /**
+   * Whether a price change earns its fee: the number of sales whose profit the fee eats, against the sales a day expected at the hub.
+   * pace: units a day you can expect to sell there (null when not known: the change is not judged).
+   * -> null, or { sales, perDay, worth } (worth: the fee is no more than the profit on a day's sales, or on one sale)
+   */
+  function payback(fee, netEach, pace) {
+    if (pace == null || !(fee > 0) || !(netEach > 0)) return null;
+    const sales = Math.ceil(fee / netEach - 1e-9);
+    return { sales, perDay: pace, worth: sales <= Math.max(1, pace) };
+  }
+  const paceText = p => (p >= 10 ? String(Math.round(p)) : p >= 1 ? (Math.round(p * 10) / 10).toString() : (Math.round(p * 100) / 100).toString());
+
+  /**
+   * How many units to list at once at a hub: `days` of the pace you can expect there, at least one, and never more than you have.
+   * Listing in batches keeps an order small, and a price change costs a share of the order's whole value.
+   * -> { list, keep } (list = all when the pace is not known)
+   */
+  function batch(qty, pace, days) {
+    if (!(qty > 0)) return { list: 0, keep: 0 };
+    if (pace == null || !(pace > 0)) return { list: qty, keep: 0 };
+    const list = Math.min(qty, Math.max(1, Math.ceil(pace * (days || 3) - 1e-9)));
+    return { list, keep: qty - list };
+  }
+
+  /**
+   * Units shared out between hubs, held to what each hub can take: `room` is { hub: units it can still take } (missing = no limit).
+   * Units over a hub's room go to the next hub in `order` that has room; what no hub can take stays behind as { name: '', units }.
+   * parts: [{ name, units }] -> [{ name, units }] in the same order, the kept units last.
+   */
+  function capSplit(parts, room, order) {
+    const out = new Map(), left = Object.assign({}, room || {});
+    let spare = 0;
+    for (const p of parts || []) {
+      const r = left[p.name] == null ? Infinity : Math.max(0, left[p.name]);
+      const take = Math.min(p.units, r);
+      if (take > 0) out.set(p.name, (out.get(p.name) || 0) + take);
+      if (left[p.name] != null) left[p.name] = r - take;
+      spare += p.units - take;
+    }
+    for (const name of order || []) {
+      if (spare <= 0) break;
+      const r = left[name] == null ? Infinity : Math.max(0, left[name]);
+      const take = Math.min(spare, r);
+      if (take > 0) { out.set(name, (out.get(name) || 0) + take); spare -= take; if (left[name] != null) left[name] = r - take; }
+    }
+    const rows = Array.from(out, e => ({ name: e[0], units: e[1] }));
+    if (spare > 0) rows.push({ name: '', units: spare });
+    return rows;
+  }
+
+  /**
+   * A bid over its max that has bought nothing for `days`: it ties up ISK and will not fill at a price that pays. Cancel it.
+   * o: { kind (the bid's call kind), issued (ms, restamped when the price changes), lastFill (ms of the last purchase of the line, or 0), escrow, now }
+   * -> null, or { reason }
+   */
+  function deadBid(o, days) {
+    if (o.kind !== 'over') return null;
+    const span = (days || 3) * 864e5;
+    if (o.now - o.issued < span || (o.lastFill && o.now - o.lastFill < span)) return null;
+    return { reason: 'Over max, and nothing filled in ' + (days || 3) + ' days: cancel it to free ' + short(o.escrow || 0) + '.' };
+  }
+
+  /**
+   * The week's net after every fee actually paid: the ledger's net counts the broker's share of each sale only, so the broker fees
+   * the journal shows beyond that (price changes, bids placed, listings not yet sold) come off too.
+   * -> { net, extra } (extra: the fees taken off, never negative)
+   */
+  function trueNet(net, gross, broker, rate) {
+    if (net == null || broker == null) return null;
+    const extra = Math.max(0, Math.abs(broker) - (rate || 0) * (gross || 0));
+    return { net: net - extra, extra };
+  }
+
+  // ------------------------------------------------------------- new lines
+  /**
+   * The New lines screen, step 1: one page of a region's order book folded into what the screen keeps per item and hub station.
+   * acc: Map type -> { [hub name]: { ask, levels: [[price, units]] (the cheapest 12 asks), bid } }
+   * hub: { name, station, system }. A bid counts at the station when it is there, region-wide, or elsewhere in its system with a range
+   * wider than its station (bids from other systems with a jump range are not measured here, so the top bid may read a little low).
+   */
+  function screenEat(acc, orders, hub) {
+    for (const o of orders || []) {
+      if (o.location_id !== hub.station && !(o.is_buy_order && (o.range === 'region' || (o.system_id === hub.system && o.range !== 'station')))) continue;
+      let e = acc.get(o.type_id);
+      if (!e) { e = {}; acc.set(o.type_id, e); }
+      const x = e[hub.name] || (e[hub.name] = { ask: null, levels: [], bid: null });
+      if (o.is_buy_order) { if (x.bid == null || o.price > x.bid) x.bid = o.price; continue; }
+      if (x.ask == null || o.price < x.ask) x.ask = o.price;
+      x.levels.push([o.price, o.volume_remain]);
+      if (x.levels.length > 24) { x.levels.sort((a, b) => a[0] - b[0]); x.levels.length = 12; }
+    }
+    return acc;
+  }
+
+  /**
+   * Step 2, the price pass: what each allowed item would cost in Jita and which hubs would pay for it, from the books alone.
+   * books: Map type -> screenEat entry (Jita under o.jita). o: { allowed: Map type -> group (or Set), skip: Set of types, jita: 'Jita',
+   *   hubs: [names], maxCost, gap (a Jita spread wider than this is bought at the ask), netMult, buyFee, floor }
+   * Cost is one legal tick over the top Jita bid, plus the broker's share for placing it; or the Jita ask where the spread is wide
+   * or the tick would meet the ask ("buy at the ask", your call). A hub passes when its lowest ask nets `floor` on that cost.
+   * -> [{ type, bid, atAsk, cost, jitaAsk, hubs: [{ name, ask, levels }] }]
+   */
+  function screenCandidates(books, o) {
+    const out = [];
+    for (const [type, e] of books) {
+      if (o.allowed && !o.allowed.has(type)) continue;
+      if (o.skip && o.skip.has(type)) continue;
+      const j = e[o.jita];
+      if (!j || (j.bid == null && j.ask == null)) continue;
+      let bid = j.bid != null ? tickAbove(j.bid) : null, atAsk = false;
+      if (bid == null || (j.ask != null && ((j.ask - j.bid) / j.ask > o.gap || bid >= j.ask))) { bid = j.ask; atAsk = true; }
+      if (bid == null || bid > o.maxCost) continue;
+      const cost = bid * (1 + (atAsk ? 0 : o.buyFee || 0));
+      const hubs = [];
+      for (const name of o.hubs) {
+        const x = e[name];
+        if (!x || x.ask == null) continue;
+        if (x.ask * o.netMult - cost >= o.floor * cost) hubs.push({ name, ask: x.ask, levels: x.levels.slice().sort((a, b) => a[0] - b[0]) });
+      }
+      if (hubs.length) out.push({ type, bid, atAsk, cost, jitaAsk: j.ask, hubs });
+    }
+    return out;
+  }
+
+  /**
+   * Step 3, the volume pass and the score, for one candidate. hist: { [hub name]: ESI daily rows, oldest first }.
+   * A hub counts when it traded `minPerDay` a day over its last 7 published days, still nets `floor` at the lowest of its ask, its newest
+   * day's average and its week's average, and has no more than `maxDays` of trade already listed within 5% of that price.
+   * Score = the sum over those hubs of net each x units a day x `share`, times the line's `weight` (how its kind of item has done for you).
+   * First lot = `lotDays` x `lotShare` of those hubs' trade, held to `lotIsk` and to a day of Jita's own trade when that is known.
+   * o: { netMult, floor, minPerDay, maxDays, share, lotDays, lotShare, lotIsk, weight, jitaPerDay, now }
+   * -> null, or { type, bid, atAsk, cost, score, raw, hubs: [{ name, price, ask, perDay, net, margin }] best first, lot: { units, isk } }
+   */
+  function screenScore(c, hist, o) {
+    const now = o.now || Date.now(), hubs = [];
+    for (const x of c.hubs) {
+      const rows = (hist[x.name] || []).filter(r => Date.parse(r.date) >= now - 8 * 864e5).slice(-7);
+      const vol = sum(rows, r => r.volume), perDay = vol / 7;
+      if (!rows.length || perDay < o.minPerDay) continue;
+      const price = Math.min(x.ask, rows[rows.length - 1].average, sum(rows, r => r.average * r.volume) / vol);
+      const net = price * o.netMult - c.cost;
+      if (net < o.floor * c.cost) continue;
+      const listed = sum((x.levels || []).filter(l => l[0] <= price * 1.05), l => l[1]);
+      if (listed > o.maxDays * perDay) continue;
+      hubs.push({ name: x.name, price, ask: x.ask, perDay, net, margin: net / c.cost });
+    }
+    if (!hubs.length) return null;
+    hubs.sort((a, b) => b.net * b.perDay - a.net * a.perDay);
+    const raw = sum(hubs, x => x.net * x.perDay * o.share), weight = o.weight == null ? 1 : o.weight;
+    let units = Math.round(sum(hubs, x => x.perDay) * o.lotDays * o.lotShare);
+    if (o.jitaPerDay != null && o.jitaPerDay > 0) units = Math.min(units, Math.floor(o.jitaPerDay));
+    units = Math.max(1, Math.min(units, Math.floor(o.lotIsk / c.bid)));
+    return { type: c.type, bid: c.bid, atAsk: c.atAsk, cost: c.cost, score: raw * weight, raw, weight, hubs, lot: { units, isk: units * c.bid } };
   }
 
   // ------------------------------------------------------------------ risk
@@ -498,7 +662,7 @@
     const next = {}, changes = [];
     for (const o of orders) {
       const i = Date.parse(o.issued), was = log && log[o.order_id];
-      if (was && i > was.i && o.price !== was.p) changes.push({ id: o.order_id, at: i,
+      if (was && i > was.i && o.price !== was.p) changes.push({ id: o.order_id, at: i, type: o.type_id, loc: o.location_id, buy: !!o.is_buy_order,
         fee: o.price * o.volume_remain * fees.modify + (o.is_buy_order ? Math.max(0, o.price - was.p) * o.volume_remain * fees.broker : 0) });
       next[o.order_id] = { i, p: o.price };
     }
@@ -857,7 +1021,7 @@
       if (f) for (const k of ['gross', 'units', 'net', 'uncovered', 'borrowed', 'basis', 'rules', 'gaps', 'frozenAt']) if (f[k] != null) out[k] = f[k];
       const exact = w => [w.fees, w.change, w.close];
       const j = x.close != null && y.close != null ? (stable(exact(x)) >= stable(exact(y)) ? x : y) : x.close != null ? x : y.close != null ? y : null;
-      if (j) { out.fees = j.fees; out.change = j.change; out.close = j.close; }
+      if (j) { out.fees = j.fees; out.change = j.change; out.close = j.close; if (j.broker != null) out.broker = j.broker; }
       const look = w => ({ at: w.seenAt || 0, escrow: w.escrow, wallet: w.wallet });
       const sn = newer(look(x), look(y));
       if (sn && sn.at) { out.escrow = sn.escrow; out.wallet = sn.wallet; out.seenAt = sn.at; }
@@ -868,6 +1032,9 @@
       // price changes counted this week: each device counts what it saw, so the fuller count stands
       const ux = x.bumps || null, uy = y.bumps || null, bp = !ux ? uy : !uy ? ux : ux.n !== uy.n ? (ux.n > uy.n ? ux : uy) : stable(ux) >= stable(uy) ? ux : uy;
       if (bp) out.bumps = bp;
+      // the same count by line goes with it (version 29 on)
+      const lines = bp === ux ? x.lines : bp === uy ? y.lines : null;
+      if (lines) out.lines = lines;
       return out;
     };
     const wa = a.weeks || {}, wb = b.weeks || {}, w = {};
@@ -1102,6 +1269,7 @@
     tickBelow, tickAbove, tickFloor, tickCeil, isLegal, levels,
     sellPosition, buyPosition, planSells, planBid,
     hubRead, spikeCap, destPlan, splitUnits, loadStep, loadFit, guardBid, lineStatus, orderChanges, exposure,
+    payback, batch, capSplit, deadBid, trueNet, screenEat, screenCandidates, screenScore,
     ledger, unitCost, summarize, uncosted, daily, velocity, startOfDay, startOfWeek,
     orderChecks, weekOf, moveRead, copyState, tripPlan, weekKey, weekStart, weekAfter, parseIsk, parseCosts, costLookup, journalSpan, tieOut, stable, syncMerge, parseEft, kitReady, shoppingList, stockNeed, multibuy, trainDays, clock, picketRoll, picketSnooze, campAlerts, nightMarkdown, programOutput, piRun, parseSigs, sellAt, tradedPerDay,
     isk, short, span, sec, shipName,

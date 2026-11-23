@@ -13,7 +13,7 @@ import org.json.JSONObject
 
 /**
  * Notifications for things that want a visit: an order that lost the lead, extractors that stopped,
- * a launchpad about to overflow. The dashboard page decides what there is to say (the "alerts" in its
+ * a launchpad about to overflow, and a price that looks mistyped or a sale under cost ("check"). The dashboard page decides what there is to say (the "alerts" in its
  * summary) and which kinds the owner asked for ("notify", set on the page's Phone notifications panel).
  * This object remembers what has been told already, so each thing is told once, and posts the rest.
  */
@@ -27,8 +27,8 @@ object Alerts {
 
     data class Note(val kind: String, val title: String, val lines: List<String>)
 
-    /** The kinds the page reports, in the order their notifications are posted. */
-    private val KINDS = listOf("change", "extractors", "launchpad")
+    /** The kinds the page reports, in the order their notifications are posted (a kind's place is also its notification's number). */
+    private val KINDS = listOf("change", "extractors", "launchpad", "check")
 
     /** The alerts in a summary that the owner has asked to hear about. */
     fun wanted(data: JSONObject): List<Alert> {
@@ -54,6 +54,7 @@ object Alerts {
             val title = when (kind) {
                 "change" -> if (n == 1) "1 order to change" else "$n orders to change"
                 "extractors" -> if (n == 1) "Extractors stopped on 1 colony" else "Extractors stopped on $n colonies"
+                "check" -> if (n == 1) "1 price to check" else "$n prices to check"
                 else -> if (n == 1) "A launchpad is nearly full" else "$n launchpads are nearly full"
             }
             val lines = ArrayList(fresh.take(MAX_LINES).map { it.text })
